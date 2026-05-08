@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Playwright
+playwright-report/
+
+# Outputs
+*.json
+*.csv
+cc_rendered.html
+
+# OS/IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
