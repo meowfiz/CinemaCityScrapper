@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import threading
 import webbrowser
 from pathlib import Path
 from queue import Queue, Empty
-from tkinter import END, BOTH, DISABLED, NORMAL, StringVar, Tk, ttk
+from tkinter import END, BOTH, DISABLED, NORMAL, StringVar, Tk, Toplevel, ttk
+from tkinter import Listbox
 from tkinter.scrolledtext import ScrolledText
 from tkinter import messagebox
 
@@ -25,6 +27,7 @@ class App(Tk):
         self._last_json: Path | None = None
         self._last_csv: Path | None = None
         self._rows: list[str] = []
+        self._items: list = []
 
         self._build_ui()
         self.after(150, self._poll_queue)
@@ -73,6 +76,11 @@ class App(Tk):
         self.tree.configure(yscrollcommand=yscroll.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
         yscroll.grid(row=0, column=1, sticky="ns")
+        filmweb_btns = ttk.Frame(results_box)
+        filmweb_btns.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(filmweb_btns, text="Uwagi Filmweb / wybór kandydata", command=self._open_filmweb_dialog).pack(
+            side="left"
+        )
         results_box.columnconfigure(0, weight=1)
         results_box.rowconfigure(0, weight=1)
 
@@ -96,6 +104,7 @@ class App(Tk):
         self.log.configure(state=DISABLED)
 
     def _set_results(self, items) -> None:
+        self._items = list(items)
         for iid in self._rows:
             try:
                 self.tree.delete(iid)
@@ -116,6 +125,112 @@ class App(Tk):
                 ),
             )
             self._rows.append(iid)
+
+    def _open_filmweb_dialog(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("Filmweb", "Zaznacz wiersz w tabeli wyników.")
+            return
+        idx = self.tree.index(sel[0])
+        if idx < 0 or idx >= len(self._items):
+            messagebox.showerror("Filmweb", "Nie znaleziono danych dla zaznaczonego wiersza.")
+            return
+        it = self._items[idx]
+
+        top = Toplevel(self)
+        top.title(f"Filmweb — {it.title}")
+        top.geometry("720x480")
+        frm = ttk.Frame(top, padding=10)
+        frm.pack(fill=BOTH, expand=True)
+
+        ttk.Label(frm, text="Przyczyna / dopasowanie (feedback z skryptu):").pack(anchor="w")
+        fb = ScrolledText(frm, height=8, wrap="word")
+        fb.pack(fill="x", expand=False, pady=(4, 8))
+        fb_text = (
+            (it.filmweb_feedback or "").strip()
+            or "Brak dodatkowego opisu (wysoka pewność dopasowania albo brak danych)."
+        )
+        if it.filmweb_url:
+            fb_text = f"Aktualny link: {it.filmweb_url}\n\n{fb_text}"
+        fb.insert(END, fb_text)
+        fb.configure(state=DISABLED)
+
+        ttk.Label(frm, text="Kandydaci z wyszukiwania (wybierz i otwórz lub zapisz do overrides.json):").pack(
+            anchor="w", pady=(8, 0)
+        )
+
+        cand_urls: list[str] = []
+        lb_frame = ttk.Frame(frm)
+        lb_frame.pack(fill=BOTH, expand=True, pady=(4, 8))
+        ylb = ttk.Scrollbar(lb_frame, orient="vertical")
+        lb = Listbox(lb_frame, height=12, yscrollcommand=ylb.set)
+        ylb.config(command=lb.yview)
+        lb.pack(side="left", fill=BOTH, expand=True)
+        ylb.pack(side="right", fill="y")
+
+        if it.filmweb_candidates:
+            for c in it.filmweb_candidates:
+                url = str(c.get("url", ""))
+                sc = c.get("score", "")
+                label = str(c.get("label", ""))[:100]
+                cand_urls.append(url)
+                lb.insert(END, f"{sc}  |  {label}  →  {url}")
+        else:
+            lb.insert(END, "(brak listy — zobacz opis powyżej lub wklej link ręcznie poniżej)")
+
+        url_var = StringVar(value=it.filmweb_url or "")
+
+        ttk.Label(frm, text="URL do otwarcia / zapisu (edytuj, jeśli trzeba):").pack(anchor="w")
+        ttk.Entry(frm, textvariable=url_var, width=92).pack(fill="x", pady=(2, 8))
+
+        def open_url(u: str | None = None) -> None:
+            s = (u or url_var.get()).strip()
+            if not s:
+                messagebox.showwarning("Filmweb", "Podaj lub wybierz adres URL.")
+                return
+            webbrowser.open(s)
+
+        def sync_from_selection() -> None:
+            sel_i = lb.curselection()
+            if sel_i and cand_urls:
+                i = sel_i[0]
+                if 0 <= i < len(cand_urls):
+                    url_var.set(cand_urls[i])
+
+        def save_override() -> None:
+            s = url_var.get().strip()
+            if not s:
+                messagebox.showwarning("Filmweb", "Podaj URL do zapisania.")
+                return
+            path = Path("overrides.json")
+            data: dict = {}
+            if path.exists():
+                try:
+                    raw = json.loads(path.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        data = raw
+                except Exception:
+                    messagebox.showerror("Filmweb", "Nie udało się odczytać overrides.json (uszkodzony JSON?).")
+                    return
+            title_key = str(it.title).strip()
+            if not title_key:
+                messagebox.showerror("Filmweb", "Pusty tytuł wiersza — nie mogę zapisać mapowania.")
+                return
+            data[title_key] = s
+            try:
+                path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception as exc:
+                messagebox.showerror("Filmweb", f"Zapis nie powiódł się: {exc}")
+                return
+            messagebox.showinfo("Filmweb", f"Zapisano w {path.resolve()}\n\nUruchom ponownie Start, by użyć nowego linku.")
+
+        lb.bind("<Double-Button-1>", lambda _e: sync_from_selection())
+
+        btn_row = ttk.Frame(frm)
+        btn_row.pack(fill="x")
+        ttk.Button(btn_row, text="Użyj zaznaczonego kandydata", command=sync_from_selection).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_row, text="Otwórz URL w przeglądarce", command=lambda: open_url()).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_row, text="Zapisz do overrides.json", command=save_override).pack(side="left")
 
     def _poll_queue(self) -> None:
         try:

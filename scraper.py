@@ -7,7 +7,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 from urllib.parse import quote, urljoin, urlparse
 
 import requests
@@ -20,12 +20,134 @@ from playwright.sync_api import sync_playwright
 TIME_RE = re.compile(r"([01]?\d|2[0-3]):[0-5]\d")
 
 
+def _cc_genre_key(tok: str) -> str:
+    s = unicodedata.normalize("NFKD", tok)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", s.lower())
+
+
+# Lista gatunków z kafelka Cinema City (po normalizacji do _cc_genre_key — porównanie do „czystego” stringa).
+_CC_GENRES_NORM = frozenset(
+    _cc_genre_key(x)
+    for x in (
+        "akcja",
+        "animowany",
+        "anime",
+        "biografia",
+        "dokument",
+        "dokumentalny",
+        "drama",
+        "dramat",
+        "dramat psychologiczny",
+        "erotyczny",
+        "familijny",
+        "familijno-przygodowy",
+        "familijno przygodowy",
+        "fantasy",
+        "fantasy przygodowy",
+        "historyczny",
+        "horror",
+        "kino akcji",
+        "komedia",
+        "komediodramat",
+        "kostiumowy",
+        "kryminał",
+        "kryminalny",
+        "melodramat",
+        "musical",
+        "muzyczny",
+        "przygodowy",
+        "romans",
+        "romantyczny",
+        "science fiction",
+        "sci-fi",
+        "sensacja",
+        "sportowy",
+        "thriller",
+        "western",
+        "wojenny",
+    )
+)
+
+
+def sanitize_cinema_city_title(raw: str) -> str:
+    """Odcina z linii Cinema City końcówki typu „… gatunki | 106 min”."""
+
+    def nz(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "")).strip()
+
+    def is_pure_genre(seg: str) -> bool:
+        s = nz(seg)
+        if not s:
+            return False
+        if _cc_genre_key(s) in _CC_GENRES_NORM:
+            return True
+        if "," not in s:
+            return False
+        parts = [nz(p) for p in s.split(",") if nz(p)]
+        return bool(parts) and all(is_pure_genre(p) for p in parts)
+
+    if not nz(raw):
+        return ""
+
+    # Pełniejsze usuwanie gatunków tylko, gdy w źródle było „… | NN min“ (standard CC).
+    had_pipe_duration = bool(re.search(r"\s*\|\s*\d{1,3}\s*min\b", raw, flags=re.I))
+
+    t = nz(raw)
+    while True:
+        stripped = re.sub(r"\s*\|\s*\d{1,3}\s*min\b\s*$", "", t, flags=re.I).strip()
+        stripped = nz(stripped)
+        if stripped == t:
+            break
+        t = stripped
+
+    while True:
+        if "," in t:
+            left, right = t.rsplit(",", 1)
+            rr = nz(right)
+            if rr and is_pure_genre(rr):
+                t = nz(left)
+                continue
+        if had_pipe_duration:
+            m = re.search(r"\s+(?P<w>[^\s|,]+)$", t)
+            if not m:
+                tn = nz(t)
+                lone = tn.strip(".,„”\"'")
+                if tn and "," not in tn and " " not in tn and lone and _cc_genre_key(lone) in _CC_GENRES_NORM:
+                    t = ""
+                    continue
+                break
+            tw = nz(m.group("w").strip(".,„”\"'"))
+            if _cc_genre_key(tw) in _CC_GENRES_NORM:
+                t = nz(t[: m.start()])
+                continue
+        break
+
+    return nz(t)
+
+
 @dataclass(frozen=True)
 class MovieShowings:
     title: str
     showtimes: list[str]
     rating_filmweb: Optional[float]
     filmweb_url: Optional[str]
+    # Tekstowy opis przy braku linku lub niskiej pewności dopasowania.
+    filmweb_feedback: Optional[str] = None
+    # Kandydaci z wyszukiwania: {"url", "score", "label"} — do wyboru w GUI.
+    filmweb_candidates: Optional[list[dict[str, Any]]] = None
+
+
+@dataclass(frozen=True)
+class FilmwebLookup:
+    """Wynik wyszukiwania na Filmweb (bez wpisów z overrides.json).
+
+    candidates: krotki (pełny_url, score, krótki opis ze strony wyszukiwania / tytułu).
+    """
+
+    url: Optional[str]
+    feedback: Optional[str]
+    candidates: tuple[tuple[str, float, str], ...]
 
 
 def _norm_space(s: str) -> str:
@@ -210,12 +332,33 @@ def extract_movies_with_showtimes_cinema_city_quickbook_text(txt: str) -> dict[s
             return False
         if any(x in sl for x in ["projekcja", "film z", "napisami", "dubbing", "wydarzenie specjalne"]):
             return False
+        ui_markers = (
+            "wyświetl",
+            "wyswietl",
+            "pokaż",
+            "pokaz",
+            "ładuj",
+            "laduj",
+            "więcej seans",
+            "wiecej seans",
+            "wszystkie seans",
+            "kolejne pozycje",
+            " przejdź ",
+            " przechod ",
+            "kup bile",
+            "wydarzenia specjal",
+        )
+        if any(u in sl for u in ui_markers):
+            return False
 
-        letters = [ch for ch in s if ch.isalpha()]
+        probe = sanitize_cinema_city_title(s)
+        letters = [ch for ch in probe if ch.isalpha()]
         if len(letters) < 2:
             return False
-        upper = sum(1 for ch in letters if ch.upper() == ch)
-        return (upper / max(1, len(letters))) >= 0.75
+        upper_ratio = sum(1 for ch in letters if ch.upper() == ch) / len(letters)
+
+        # Tytuły w liście CC są najczęściej WIELKIMI literami — luzowanie przyjmowało też „gatunki | min” jako tytuł.
+        return upper_ratio >= 0.75
 
     movies: dict[str, list[str]] = {}
     current_title: Optional[str] = None
@@ -224,7 +367,8 @@ def extract_movies_with_showtimes_cinema_city_quickbook_text(txt: str) -> dict[s
     def flush():
         nonlocal current_title, current_times
         if current_title and current_times:
-            movies[current_title] = _unique_preserve((movies.get(current_title) or []) + current_times)
+            key = sanitize_cinema_city_title(current_title) or current_title.strip()
+            movies[key] = _unique_preserve((movies.get(key) or []) + current_times)
         current_title = None
         current_times = []
 
@@ -285,7 +429,9 @@ def _filmweb_query_variants(title: str) -> list[str]:
     return _unique_preserve(variants)
 
 
-def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Optional[str]:
+def filmweb_lookup_movie(title: str, session: requests.Session) -> FilmwebLookup:
+    """Wyszukuje film na Filmweb; zwraca URL lub None + przyczynę oraz kandydatów."""
+
     def norm(s: str) -> str:
         s = unicodedata.normalize("NFKD", s or "")
         s = "".join(ch for ch in s if not unicodedata.combining(ch))
@@ -318,14 +464,26 @@ def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Opt
         contains_all = 1.0 if (must and must.issubset(c_tokens)) else 0.0
         return overlap + 0.35 * prefix + 0.15 * contains_all
 
-    def search_once(qt: str, *, allow_vod: bool) -> list[tuple[str, float]]:
+    # Wszystkie zobaczone /film/ (także score 0) — do pokazania w GUI przy krótkich / dziwnych tytułach.
+    display_candidates: dict[str, tuple[float, str]] = {}
+
+    def merge_display(url_: str, sc_: float, lbl_: str) -> None:
+        lbl_short = lbl_[:200]
+        if url_ not in display_candidates:
+            display_candidates[url_] = (sc_, lbl_short)
+            return
+        old_sc, old_lbl = display_candidates[url_]
+        if sc_ > old_sc or (sc_ == old_sc and len(lbl_short) > len(old_lbl)):
+            display_candidates[url_] = (sc_, lbl_short)
+
+    def search_once(qt: str, *, allow_vod: bool) -> list[tuple[str, float, str]]:
         q = quote(qt)
         url = f"https://www.filmweb.pl/search?q={q}"
         resp = session.get(url, timeout=20)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "lxml")
 
-        scored: list[tuple[str, float]] = []
+        scored: list[tuple[str, float, str]] = []
         for a in soup.select("a[href^='/film/']"):
             href = a.get("href") or ""
             if not href.startswith("/film/"):
@@ -336,9 +494,12 @@ def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Opt
             if not text:
                 text = _norm_space(a.get("title") or "") or _norm_space(a.get("aria-label") or "")
             sc = score(text, href)
+            full = urljoin("https://www.filmweb.pl", href)
+            lbl = text or href.strip("/")
+            merge_display(full, sc, lbl)
             if sc <= 0:
                 continue
-            scored.append((urljoin("https://www.filmweb.pl", href), sc))
+            scored.append((full, sc, lbl))
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:8]
@@ -360,7 +521,7 @@ def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Opt
             return _norm_space(str(ogt.get("content")))
         return ""
 
-    def search_playwright(qt: str, *, allow_vod: bool) -> list[tuple[str, float]]:
+    def search_playwright(qt: str, *, allow_vod: bool) -> list[tuple[str, float, str]]:
         # Filmweb wyniki wyszukiwania są często renderowane po stronie JS.
         q = quote(qt)
         url = f"https://www.filmweb.pl/search?q={q}"
@@ -379,7 +540,7 @@ def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Opt
                     pass
                 anchors = page.locator("a[href^='/film/']")
                 n = min(anchors.count(), 60)
-                scored: list[tuple[str, float]] = []
+                scored: list[tuple[str, float, str]] = []
                 for i in range(n):
                     a = anchors.nth(i)
                     href = a.get_attribute("href") or ""
@@ -392,8 +553,9 @@ def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Opt
                         txt = _norm_space(a.get_attribute("title") or "") or _norm_space(a.get_attribute("aria-label") or "")
                     full = urljoin("https://www.filmweb.pl", href)
                     sc = score(txt, href)
+                    merge_display(full, sc, txt or href.strip("/"))
                     if sc > 0:
-                        scored.append((full, sc))
+                        scored.append((full, sc, txt or href.strip("/")))
                 context.close()
                 browser.close()
         except Exception:
@@ -406,76 +568,141 @@ def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Opt
         m = re.search(r"-(19\d{2}|20\d{2})-(\d+)(?:/|$)", u)
         return int(m.group(1)) if m else -1
 
-    def pick_newest(cands: list[tuple[str, float]]) -> Optional[str]:
-        # "bierz najnowszy i tyle": jeśli mamy kilka sensownych kandydatów,
-        # wybieramy najwyższy rok z URL (np. ...-2026-...).
-        if not cands:
+    def merge_into(store: dict[str, tuple[float, str]], items: Iterable[tuple[str, float, str]]) -> None:
+        for url_, sc_, lbl_ in items:
+            if url_ not in store or sc_ > store[url_][0]:
+                store[url_] = (sc_, lbl_)
+
+    def pick_newest_url(store: dict[str, tuple[float, str]]) -> Optional[str]:
+        if not store:
             return None
-        ranked = sorted(
-            cands,
-            key=lambda x: (extract_year_from_url(x[0]), x[1]),
+        best_u = sorted(
+            store.keys(),
+            key=lambda u_: (extract_year_from_url(u_), store[u_][0]),
             reverse=True,
-        )
-        return ranked[0][0]
+        )[0]
+        return best_u
 
-    # 1) Preferuj strony filmu (bez /vod), a jeśli brak – dopiero wtedy /vod.
-    best_url: Optional[str] = None
+    def verify_pairs(items: Iterable[tuple[str, float, str]]) -> None:
+        nonlocal best_url, best_score
+        for cand_url_, sc_, __ in items:
+            pt = page_title_from_film(cand_url_)
+            scv = max(sc_, score(pt, cand_url_))
+            if scv > best_score:
+                best_url = cand_url_
+                best_score = scv
+
+    variants_try = _filmweb_query_variants(title)
+    url_to_best: dict[str, tuple[float, str]] = {}
+    chosen_url: Optional[str] = None
+    heuristic_note: Optional[str] = None
+
+    best_url = None
     best_score = 0.0
-    newest_pool: list[tuple[str, float]] = []
 
-    for qt in _filmweb_query_variants(title):
+    for qt in variants_try:
         cands = search_once(qt, allow_vod=False)
-        newest_pool.extend(cands)
-        for cand_url, sc in cands:
-            # weryfikacja po wejściu na stronę filmu
-            pt = page_title_from_film(cand_url)
-            sc2 = max(sc, score(pt, cand_url))
-            if sc2 > best_score:
-                best_url, best_score = cand_url, sc2
-
-        # fallback: JS search
+        merge_into(url_to_best, cands)
+        verify_pairs(cands)
         if best_score < 0.35:
-            cands2 = search_playwright(qt, allow_vod=False)
-            newest_pool.extend(cands2)
-            for cand_url, sc in cands2:
-                pt = page_title_from_film(cand_url)
-                sc2 = max(sc, score(pt, cand_url))
-                if sc2 > best_score:
-                    best_url, best_score = cand_url, sc2
+            cands_p = search_playwright(qt, allow_vod=False)
+            merge_into(url_to_best, cands_p)
+            verify_pairs(cands_p)
 
     if best_url and best_score >= 0.35:
-        return best_url
+        chosen_url = best_url
+    else:
+        nw_pre = pick_newest_url(url_to_best)
+        if nw_pre:
+            chosen_url = nw_pre
+            heuristic_note = (
+                "Brak pewnego automatycznego dopasowania; użyto heurystyki „najnowszy rok\" w adresie Filmweb."
+            )
+        else:
+            for qt in variants_try:
+                cands = search_once(qt, allow_vod=True)
+                merge_into(url_to_best, cands)
+                verify_pairs(cands)
+                if best_score < 0.32:
+                    cands_p = search_playwright(qt, allow_vod=True)
+                    merge_into(url_to_best, cands_p)
+                    verify_pairs(cands_p)
 
-    # Fallback: weź "najnowszy" z puli (zamiast zwracać None)
-    newest = pick_newest(newest_pool)
-    if newest:
-        return newest
+            if best_url and best_score >= 0.32:
+                chosen_url = best_url
+            else:
+                nw2 = pick_newest_url(url_to_best)
+                if nw2:
+                    chosen_url = nw2
+                    heuristic_note = (
+                        "Brak pewnego dopasowania; użyto heurystyki „najnowszy rok\" (po uwzględnieniu /vod)."
+                    )
 
-    for qt in _filmweb_query_variants(title):
-        cands = search_once(qt, allow_vod=True)
-        newest_pool.extend(cands)
-        for cand_url, sc in cands:
-            pt = page_title_from_film(cand_url)
-            sc2 = max(sc, score(pt, cand_url))
-            if sc2 > best_score:
-                best_url, best_score = cand_url, sc2
+    def build_candidate_ranking(limit: int = 18) -> tuple[tuple[str, float, str], ...]:
+        merged: dict[str, tuple[float, str]] = dict(display_candidates)
+        for u_, pair in url_to_best.items():
+            sc_, lbl_ = pair
+            if u_ not in merged or sc_ > merged[u_][0]:
+                merged[u_] = (sc_, lbl_[:200])
+            elif abs(sc_ - merged[u_][0]) < 1e-9:
+                merged[u_] = (sc_, max(lbl_, merged[u_][1], key=len)[:200])
+        ranking = sorted(
+            merged.items(),
+            key=lambda item: (
+                item[1][0],
+                extract_year_from_url(item[0]),
+                len(item[1][1]),
+            ),
+            reverse=True,
+        )[:limit]
+        return tuple((str(u_), float(sc_), str(lbl_)[:160]) for u_, (sc_, lbl_) in ranking)
 
-        if best_score < 0.32:
-            cands2 = search_playwright(qt, allow_vod=True)
-            newest_pool.extend(cands2)
-            for cand_url, sc in cands2:
-                pt = page_title_from_film(cand_url)
-                sc2 = max(sc, score(pt, cand_url))
-                if sc2 > best_score:
-                    best_url, best_score = cand_url, sc2
+    tup = build_candidate_ranking()
 
-    if best_url and best_score >= 0.32:
-        return best_url
+    if chosen_url:
+        fb: Optional[str] = None
+        if best_score >= 0.35:
+            fb = heuristic_note  # rzadkie: pewność OK, ale użytkownik i tak dostaje czysty wiersz
+        else:
+            fb = heuristic_note or (
+                f"Wybrano URL z automatycznego lub heurystycznego dopasowania (wynik wg algorytmu: {best_score:.2f})."
+            )
 
-    newest = pick_newest(newest_pool)
-    if newest:
-        return newest
-    return None
+        ambiguous = False
+        if tup and len(tup) >= 2 and 0.22 <= best_score < 0.35:
+            ambiguous = True
+            if fb:
+                fb = fb + "\nKilka wyników ma zbliżoną pewność – warto sprawdzić listę i ewentualnie wybrać inny adres."
+            else:
+                fb = "Kilka wyników ma zbliżoną pewność – warto sprawdzić listę i ewentualnie wybrać inny adres."
+
+        return FilmwebLookup(
+            url=chosen_url,
+            feedback=fb,
+            candidates=tup if (fb or ambiguous) else (),
+        )
+
+    lines = [
+        f"Tytuł z repertuaru: {title!r}",
+        f"Wypróbowane warianty zapytania: {variants_try}",
+        "Nie znaleziono pewnego ani heurystycznego adresu /film na Filmweb (brak lub zerowy automatyczny dopasowany score).",
+    ]
+    if tup:
+        lines.append(
+            "Na stronie wyszukiwania Filmweb są wyniki w liście poniżej — score 0 oznacza, że tytuł z kina "
+            "nie pokrywa się z algorytmem dopasowania; wybierz właściwy adres ręcznie."
+        )
+    elif not display_candidates:
+        lines.append(
+            "Filmweb nie zwrócił żadnych linków /film/ (możliwy rendering po stronie przeglądarki albo blokada)."
+            "\nSpróbuj wkleić adres z ręcznego wyszukania na filmweb.pl."
+        )
+
+    return FilmwebLookup(url=None, feedback="\n".join(lines), candidates=tup)
+
+
+def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Optional[str]:
+    return filmweb_lookup_movie(title, session).url
 
 
 def filmweb_extract_rating(film_url: str, session: requests.Session) -> Optional[float]:
@@ -527,21 +754,22 @@ def filmweb_extract_rating(film_url: str, session: requests.Session) -> Optional
     return None
 
 
+def normalize_override_key(title: str) -> str:
+    """Klucz dopasowania override odporny na polskie znaki i zastępniki Unicode (�)."""
+    s = (title or "").replace("\ufffd", " ")
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.lower()
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def enrich_with_filmweb_ratings(
     movies: dict[str, list[str]],
     *,
     sleep_s: float = 0.4,
     progress_cb=None,
 ) -> list[MovieShowings]:
-    def okey(s: str) -> str:
-        # klucz override odporny na polskie znaki i "krzaki" (�)
-        s = (s or "").replace("\ufffd", " ")
-        s = unicodedata.normalize("NFKD", s)
-        s = "".join(ch for ch in s if not unicodedata.combining(ch))
-        s = s.lower()
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
-
     # Optional overrides: mapowanie tytuł -> URL Filmweb
     # Plik: overrides.json w katalogu uruchomienia (obok skryptu).
     overrides: dict[str, str] = {}
@@ -550,7 +778,9 @@ def enrich_with_filmweb_ratings(
         if p.exists():
             data = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                overrides = {okey(str(k)): str(v).strip() for k, v in data.items() if k and v}
+                overrides = {
+                    normalize_override_key(str(k)): str(v).strip() for k, v in data.items() if k and v
+                }
     except Exception:
         overrides = {}
 
@@ -574,14 +804,27 @@ def enrich_with_filmweb_ratings(
 
         film_url = None
         rating = None
+        feedback: Optional[str] = None
+        cand_entries: Optional[list[dict[str, Any]]] = None
         try:
-            key = okey(title)
-            film_url = overrides.get(key) or filmweb_search_first_movie_url(title, session=session)
-            if film_url:
-                rating = filmweb_extract_rating(film_url, session=session)
-        except Exception:
-            film_url = film_url
-            rating = None
+            key = normalize_override_key(title)
+            override_u = overrides.get(key)
+            if override_u:
+                film_url = override_u
+                if film_url:
+                    rating = filmweb_extract_rating(film_url, session=session)
+            else:
+                lk = filmweb_lookup_movie(title, session=session)
+                film_url = lk.url
+                feedback = lk.feedback
+                if lk.candidates:
+                    cand_entries = [
+                        {"url": u, "score": round(s, 4), "label": lbl} for u, s, lbl in lk.candidates
+                    ]
+                if film_url:
+                    rating = filmweb_extract_rating(film_url, session=session)
+        except Exception as exc:
+            feedback = f"Błąd podczas wyszukiwania / pobierania oceny Filmweb: {exc}"
 
         out.append(
             MovieShowings(
@@ -589,6 +832,8 @@ def enrich_with_filmweb_ratings(
                 showtimes=showtimes,
                 rating_filmweb=rating,
                 filmweb_url=film_url,
+                filmweb_feedback=feedback,
+                filmweb_candidates=cand_entries,
             )
         )
         time.sleep(sleep_s)
@@ -607,7 +852,17 @@ def write_outputs(items: list[MovieShowings], out_prefix: Path) -> tuple[Path, P
     )
 
     with csv_path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["title", "rating_filmweb", "filmweb_url", "showtimes"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "title",
+                "rating_filmweb",
+                "filmweb_url",
+                "filmweb_feedback",
+                "filmweb_candidates",
+                "showtimes",
+            ],
+        )
         w.writeheader()
         for it in items:
             w.writerow(
@@ -615,6 +870,10 @@ def write_outputs(items: list[MovieShowings], out_prefix: Path) -> tuple[Path, P
                     "title": it.title,
                     "rating_filmweb": it.rating_filmweb,
                     "filmweb_url": it.filmweb_url,
+                    "filmweb_feedback": it.filmweb_feedback or "",
+                    "filmweb_candidates": (
+                        json.dumps(it.filmweb_candidates, ensure_ascii=False) if it.filmweb_candidates else ""
+                    ),
                     "showtimes": ", ".join(it.showtimes),
                 }
             )
