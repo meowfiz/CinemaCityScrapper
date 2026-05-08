@@ -258,6 +258,33 @@ def extract_movies(url: str, rendered_html: str) -> dict[str, list[str]]:
     return extract_movies_with_showtimes_generic(rendered_html)
 
 
+def _filmweb_query_variants(title: str) -> list[str]:
+    t = _norm_space(title)
+    variants: list[str] = [t]
+
+    # usuń "replacement char" (częsty przy problemach z encodingiem w źródle)
+    t0 = _norm_space(t.replace("\ufffd", " "))
+    if t0 and t0 not in variants:
+        variants.append(t0)
+
+    # Usuń bardzo częste "dodatki" z Cinema City
+    t2 = re.sub(r"\b(MARATON|FILM)\b", "", t, flags=re.I)
+    t2 = _norm_space(t2)
+    if t2 and t2 not in variants:
+        variants.append(t2)
+
+    # Utnij dopiski po myślniku / dwukropku (ale zostaw, jeśli zbyt krótkie)
+    for sep in [" – ", " - ", " — ", ": "]:
+        if sep in t:
+            head = _norm_space(t.split(sep, 1)[0])
+            if len(head) >= 6 and head not in variants:
+                variants.append(head)
+
+    # Zredukuj wielokrotne spacje i znaki łączące
+    variants = [_norm_space(v) for v in variants if v]
+    return _unique_preserve(variants)
+
+
 def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Optional[str]:
     def norm(s: str) -> str:
         s = unicodedata.normalize("NFKD", s or "")
@@ -275,33 +302,179 @@ def filmweb_search_first_movie_url(title: str, session: requests.Session) -> Opt
         c_tokens = set(c.split())
         if not q_tokens or not c_tokens:
             return 0.0
+        # wymagaj sensownego pokrycia tokenów; inaczej wolimy brak oceny niż zły film
         overlap = len(q_tokens & c_tokens) / len(q_tokens)
         prefix = 1.0 if c.startswith(q) or q.startswith(c) else 0.0
-        return overlap + 0.25 * prefix
 
-    q = quote(title)
-    url = f"https://www.filmweb.pl/search?q={q}"
-    resp = session.get(url, timeout=20)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "lxml")
+        # jeśli mamy "długie" tokeny, muszą się w większości zgadzać
+        long_q = {t for t in q_tokens if len(t) >= 4}
+        if long_q:
+            long_overlap = len(long_q & c_tokens) / len(long_q)
+            if long_overlap < 0.6 and prefix == 0.0:
+                return 0.0
 
-    best_url = None
+        # bonus jeśli kandydat zawiera wszystkie tokeny z query (krótkie pomijamy)
+        must = {t for t in q_tokens if len(t) >= 5}
+        contains_all = 1.0 if (must and must.issubset(c_tokens)) else 0.0
+        return overlap + 0.35 * prefix + 0.15 * contains_all
+
+    def search_once(qt: str, *, allow_vod: bool) -> list[tuple[str, float]]:
+        q = quote(qt)
+        url = f"https://www.filmweb.pl/search?q={q}"
+        resp = session.get(url, timeout=20)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        scored: list[tuple[str, float]] = []
+        for a in soup.select("a[href^='/film/']"):
+            href = a.get("href") or ""
+            if not href.startswith("/film/"):
+                continue
+            if (not allow_vod) and ("/vod" in href):
+                continue
+            text = _norm_space(a.get_text(" ", strip=True))
+            if not text:
+                text = _norm_space(a.get("title") or "") or _norm_space(a.get("aria-label") or "")
+            sc = score(text, href)
+            if sc <= 0:
+                continue
+            scored.append((urljoin("https://www.filmweb.pl", href), sc))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:8]
+
+    def page_title_from_film(url: str) -> str:
+        try:
+            resp = session.get(url, timeout=20)
+            resp.raise_for_status()
+        except Exception:
+            return ""
+        soup = BeautifulSoup(resp.text, "lxml")
+        h1 = soup.find(["h1", "h2"])
+        if h1:
+            t = _norm_space(h1.get_text(" ", strip=True))
+            if t:
+                return t
+        ogt = soup.find("meta", attrs={"property": "og:title"})
+        if ogt and ogt.get("content"):
+            return _norm_space(str(ogt.get("content")))
+        return ""
+
+    def search_playwright(qt: str, *, allow_vod: bool) -> list[tuple[str, float]]:
+        # Filmweb wyniki wyszukiwania są często renderowane po stronie JS.
+        q = quote(qt)
+        url = f"https://www.filmweb.pl/search?q={q}"
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                )
+                page = context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                # poczekaj aż pojawią się linki do filmów
+                try:
+                    page.wait_for_selector("a[href^='/film/']", timeout=12_000)
+                except Exception:
+                    pass
+                anchors = page.locator("a[href^='/film/']")
+                n = min(anchors.count(), 60)
+                scored: list[tuple[str, float]] = []
+                for i in range(n):
+                    a = anchors.nth(i)
+                    href = a.get_attribute("href") or ""
+                    if not href.startswith("/film/"):
+                        continue
+                    if (not allow_vod) and ("/vod" in href):
+                        continue
+                    txt = _norm_space(a.inner_text(timeout=2000) or "")
+                    if not txt:
+                        txt = _norm_space(a.get_attribute("title") or "") or _norm_space(a.get_attribute("aria-label") or "")
+                    full = urljoin("https://www.filmweb.pl", href)
+                    sc = score(txt, href)
+                    if sc > 0:
+                        scored.append((full, sc))
+                context.close()
+                browser.close()
+        except Exception:
+            return []
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:8]
+
+    def extract_year_from_url(u: str) -> int:
+        m = re.search(r"-(19\d{2}|20\d{2})-(\d+)(?:/|$)", u)
+        return int(m.group(1)) if m else -1
+
+    def pick_newest(cands: list[tuple[str, float]]) -> Optional[str]:
+        # "bierz najnowszy i tyle": jeśli mamy kilka sensownych kandydatów,
+        # wybieramy najwyższy rok z URL (np. ...-2026-...).
+        if not cands:
+            return None
+        ranked = sorted(
+            cands,
+            key=lambda x: (extract_year_from_url(x[0]), x[1]),
+            reverse=True,
+        )
+        return ranked[0][0]
+
+    # 1) Preferuj strony filmu (bez /vod), a jeśli brak – dopiero wtedy /vod.
+    best_url: Optional[str] = None
     best_score = 0.0
+    newest_pool: list[tuple[str, float]] = []
 
-    for a in soup.select("a[href^='/film/']"):
-        href = a.get("href") or ""
-        if not href.startswith("/film/"):
-            continue
-        if "/vod" in href:
-            continue
-        text = _norm_space(a.get_text(" ", strip=True))
-        sc = score(text, href)
-        if sc > best_score:
-            best_score = sc
-            best_url = urljoin("https://www.filmweb.pl", href)
+    for qt in _filmweb_query_variants(title):
+        cands = search_once(qt, allow_vod=False)
+        newest_pool.extend(cands)
+        for cand_url, sc in cands:
+            # weryfikacja po wejściu na stronę filmu
+            pt = page_title_from_film(cand_url)
+            sc2 = max(sc, score(pt, cand_url))
+            if sc2 > best_score:
+                best_url, best_score = cand_url, sc2
+
+        # fallback: JS search
+        if best_score < 0.35:
+            cands2 = search_playwright(qt, allow_vod=False)
+            newest_pool.extend(cands2)
+            for cand_url, sc in cands2:
+                pt = page_title_from_film(cand_url)
+                sc2 = max(sc, score(pt, cand_url))
+                if sc2 > best_score:
+                    best_url, best_score = cand_url, sc2
 
     if best_url and best_score >= 0.35:
         return best_url
+
+    # Fallback: weź "najnowszy" z puli (zamiast zwracać None)
+    newest = pick_newest(newest_pool)
+    if newest:
+        return newest
+
+    for qt in _filmweb_query_variants(title):
+        cands = search_once(qt, allow_vod=True)
+        newest_pool.extend(cands)
+        for cand_url, sc in cands:
+            pt = page_title_from_film(cand_url)
+            sc2 = max(sc, score(pt, cand_url))
+            if sc2 > best_score:
+                best_url, best_score = cand_url, sc2
+
+        if best_score < 0.32:
+            cands2 = search_playwright(qt, allow_vod=True)
+            newest_pool.extend(cands2)
+            for cand_url, sc in cands2:
+                pt = page_title_from_film(cand_url)
+                sc2 = max(sc, score(pt, cand_url))
+                if sc2 > best_score:
+                    best_url, best_score = cand_url, sc2
+
+    if best_url and best_score >= 0.32:
+        return best_url
+
+    newest = pick_newest(newest_pool)
+    if newest:
+        return newest
     return None
 
 
@@ -360,6 +533,27 @@ def enrich_with_filmweb_ratings(
     sleep_s: float = 0.4,
     progress_cb=None,
 ) -> list[MovieShowings]:
+    def okey(s: str) -> str:
+        # klucz override odporny na polskie znaki i "krzaki" (�)
+        s = (s or "").replace("\ufffd", " ")
+        s = unicodedata.normalize("NFKD", s)
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        s = s.lower()
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    # Optional overrides: mapowanie tytuł -> URL Filmweb
+    # Plik: overrides.json w katalogu uruchomienia (obok skryptu).
+    overrides: dict[str, str] = {}
+    try:
+        p = Path("overrides.json")
+        if p.exists():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                overrides = {okey(str(k)): str(v).strip() for k, v in data.items() if k and v}
+    except Exception:
+        overrides = {}
+
     session = requests.Session()
     session.headers.update(
         {
@@ -381,7 +575,8 @@ def enrich_with_filmweb_ratings(
         film_url = None
         rating = None
         try:
-            film_url = filmweb_search_first_movie_url(title, session=session)
+            key = okey(title)
+            film_url = overrides.get(key) or filmweb_search_first_movie_url(title, session=session)
             if film_url:
                 rating = filmweb_extract_rating(film_url, session=session)
         except Exception:

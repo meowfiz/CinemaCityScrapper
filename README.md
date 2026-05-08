@@ -41,3 +41,12 @@ python gui.py
 
 Wklejasz link, klikasz **Start**, a wynik zapisze się do JSON/CSV (i jest posortowany od najlepszego do najgorszego).
 
+## Gdy Filmweb nie znajduje części tytułów
+
+Filmweb nie zawsze zwraca sensowne wyniki wyszukiwania dla krótkich/ogólnych tytułów lub stron renderowanych po JS.
+Możesz dodać ręczne mapowanie tytuł → URL w pliku `overrides.json` (w katalogu projektu).
+
+- Skopiuj `overrides.example.json` → `overrides.json`
+- Dopisz brakujące tytuły i ich linki z Filmweb
+
+
