@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.1 (2026-09-10). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.2 (2026-09-10). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -77,6 +77,17 @@ i otwartymi zadaniami czytanymi z OpenSpec**, oraz trybem `--verify`. Kolejne ur
 porównuje się z poprzednim manifestem i wypisuje **nowe / zmienione / usunięte** — odpowiedź na
 „daj aktualną paczkę" jest pomiarem, nie zgadywaniem. Zmierz kompresowalność **przed** wyborem
 nośnika: tablice etykiet kompresują się setki razy, wagi sieci wcale.
+
+**2.7 Zero usunięć przed pushem z automatu.** Każdy skrypt lub pętla, która klonuje, commituje i pushuje
+(rollout do wielu repo, synchronizacja plików), przed `push` sprawdza trzy rzeczy i przerywa przy pierwszej
+niezgodnej: (1) kod wyjścia `clone` czytany wprost, **bez `| tail`/`| head`**, które go połykają;
+(2) `git status --short` puste po klonie (na Windows klon z `-c core.longpaths=true`); (3) po commicie
+`git diff --name-status <baza> HEAD` zawiera **zero wierszy `D`** i tylko oczekiwane pliki. Tożsamość
+committera podana jawnie (`-c user.email -c user.name`), inaczej `commit`/`revert` padają cicho z kodem 128.
+*Dlaczego:* 2026-09-10 płytki klon padł na checkout przez długie ścieżki, `tail` zjadł kod błędu,
+`git add <pliki>` + `commit` zapisał drzewo z częściowego indeksu i push usunął 43 / 2587 / 5009 plików
+w trzech repo na gałęzi domyślnej. Naprawa revertem bez `--force`; wyłapały to dopiero statystyki commita
+(„+6 plików" nie pasowało do 304 989 usunięć).
 
 ---
 
@@ -285,5 +296,6 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.2 | 2026-09-10 | Reguła 2.7 „zero usunięć przed pushem z automatu" (kod wyjścia klonu bez potoku, czysty status, zero `D` w diffie, jawna tożsamość committera). *Skąd:* incydent rollout'u paczki w `project_integration` — płytki klon + połknięty kod błędu = usunięte drzewa w 3 repo, naprawione revertem. |
 | 1.1 | 2026-09-10 | Meta-projekt `project_integration` (zmiana OpenSpec `project-monitor`): sekcja 9 zyskuje `.claude/settings.json` (hooki heartbeat) i `monitor/heartbeat.py` + `taskparse.py`; opis instalacji paczki i synchronizacji tego pliku. *Dlaczego:* bez wspólnych hooków nie ma sygnału „pracuje teraz", a bez jednego parsera `tasks.md` liczba w STATUS.md i na telefonie rozjeżdżają się. |
 | 1.0 | 2026-09-10 | Konsolidacja: CLAUDE.md projektu, reguły `.cursor/rules`, pamięć feedback, wnioski sesji 58–61 (7× błąd kalibracji na innej populacji, heredoc, `assert` przy `replace`, prerejestracja, wielokrotność, prowenienecja, gwarancje konformalne, pół-automat, paczka przenoszenia) |
