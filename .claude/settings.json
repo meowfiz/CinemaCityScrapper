@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python monitor/heartbeat.py --event session_start || python3 monitor/heartbeat.py --event session_start",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python monitor/heartbeat.py --event prompt || python3 monitor/heartbeat.py --event prompt",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python monitor/heartbeat.py --event tool || python3 monitor/heartbeat.py --event tool",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python monitor/heartbeat.py --event stop || python3 monitor/heartbeat.py --event stop",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python monitor/heartbeat.py --event session_end || python3 monitor/heartbeat.py --event session_end",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

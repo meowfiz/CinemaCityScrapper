@@ -19,3 +19,5 @@ Thumbs.db
 .idea/
 .vscode/
 
+# project-monitor hooks (ZASADY_PRACY sekcja 9) must be committed despite *.json
+!.claude/settings.json
