@@ -10,6 +10,7 @@ Configuration (never in the repo): ~/.claude/monitor.env with KEY=VALUE lines
     MONITOR_TOKEN        bearer token; required
     MONITOR_MACHINE      machine label; default: hostname
     MONITOR_SEND_PROMPT  1 (default) or 0 to omit prompt_excerpt
+    MONITOR_SEND_TOKENS  1 (default) or 0 to skip `rtk gain` counters on stop/session_end
 Environment variables of the same names override the file.
 MONITOR_ENV_FILE overrides the location of the env file (tests).
 
@@ -25,6 +26,7 @@ import datetime
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,7 +67,7 @@ def load_config():
                 cfg[k.strip()] = v.strip().strip('"').strip("'")
     except OSError:
         pass
-    for k in ("MONITOR_URL", "MONITOR_TOKEN", "MONITOR_MACHINE", "MONITOR_SEND_PROMPT"):
+    for k in ("MONITOR_URL", "MONITOR_TOKEN", "MONITOR_MACHINE", "MONITOR_SEND_PROMPT", "MONITOR_SEND_TOKENS"):
         if os.environ.get(k) is not None:
             cfg[k] = os.environ[k]
     return cfg
@@ -137,6 +139,32 @@ def throttled(event, session_id):
     return False
 
 
+def rtk_tokens(cwd):
+    """Cumulative RTK token counters for this project (rtk gain --project --format json).
+    Returns dict(commands, input, output, saved) or None when rtk is missing or slow.
+    These are tokens of tool output filtered by RTK, a proxy for tool-output volume,
+    not the Claude API bill."""
+    exe = shutil.which("rtk")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, "gain", "--project", "--format", "json"],
+            cwd=cwd, capture_output=True, text=True, timeout=3,
+        )
+        if out.returncode != 0:
+            return None
+        summ = json.loads(out.stdout).get("summary") or {}
+        return {
+            "commands": int(summ.get("total_commands", 0)),
+            "input": int(summ.get("total_input", 0)),
+            "output": int(summ.get("total_output", 0)),
+            "saved": int(summ.get("total_saved", 0)),
+        }
+    except Exception:
+        return None
+
+
 def build_event(event, hook, cfg):
     cwd = hook.get("cwd") or os.getcwd()
     root = repo_root(cwd)
@@ -153,6 +181,10 @@ def build_event(event, hook, cfg):
         prompt = hook.get("prompt")
         if isinstance(prompt, str) and prompt.strip():
             ev["prompt_excerpt"] = " ".join(prompt.split())[:PROMPT_EXCERPT_LEN]
+    if event in ("stop", "session_end") and cfg.get("MONITOR_SEND_TOKENS", "1") != "0":
+        tokens = rtk_tokens(cwd)
+        if tokens is not None:
+            ev["tokens"] = tokens
     if event == "tool" and hook.get("tool_name"):
         ev["tool_name"] = str(hook["tool_name"])[:60]
     return ev
