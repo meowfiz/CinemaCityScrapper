@@ -183,10 +183,21 @@ def first_sentence(text, limit):
     return s[:limit] if s else None
 
 
+SYNTHETIC_PROMPT_MARKS = ("<task-notification>", "<system-reminder>", "[SYSTEM NOTIFICATION", "<<autonomous-loop")
+
+
+def is_synthetic_prompt(text):
+    """Background-task and loop wake-ups reach UserPromptSubmit too; they are activity, not a new task."""
+    return isinstance(text, str) and text.lstrip().startswith(SYNTHETIC_PROMPT_MARKS)
+
+
 def build_event(event, hook, cfg, label=None):
     cwd = hook.get("cwd") or os.getcwd()
     root = repo_root(cwd)
     wire_event = "stop" if event == "stop_failure" else event
+    if event == "prompt" and is_synthetic_prompt(hook.get("user_input") or hook.get("prompt")):
+        event = wire_event = "tool"
+        hook = dict(hook, tool_name="task-notification")
     ev = {
         "repo": repo_name(cwd),
         "machine": cfg.get("MONITOR_MACHINE") or platform.node(),
