@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.2 (2026-09-10). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.3 (2026-09-11). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -45,6 +45,14 @@ którego nie zapisano, wraca.
 **1.4 Pliki „handoff"** (`notes/HANDOFF_*.md`) — jeden punkt wejścia do tematu: co działa, czego
 wymaga, jak odtworzyć, znane pułapki. Aktualizowany, gdy zmienia się coś, co druga maszyna musi
 wiedzieć.
+
+**1.5 Nazwa zadania na starcie.** Gdy zadanie zapowiada się na dłużej niż minutę (testy, build, wiele
+plików, rollout, pomiar), Claude **na początku** nadaje mu nazwę jednym wywołaniem:
+`python monitor/heartbeat.py --event label --label "Parser tasks.md: kontynuacje"` — rzeczownik + obiekt,
+do 40 znaków, bez ścieżek; to tekst, który wyląduje na ekranie blokady telefonu. Odpowiedzi poniżej minuty
+(rozmowa, nauka języka) nazwy nie potrzebują. *Dlaczego:* monitor liczy czas zadania od promptu do stopu
+i powiadamia dopiero powyżej progu; bez nazwy powiadomienie pokazuje pierwsze słowa promptu, które rzadko
+mówią, co się właściwie skończyło.
 
 ---
 
@@ -271,7 +279,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `openspec/changes/*/tasks.md` | zadania `- [ ]` / `- [x]`, wpisy PREREJESTRACJA | meta-projekt (otwarte zadania) |
 | `openspec/STATUS.md` | **generowany** `notes/gen_openspec_status.py` | meta-projekt (postęp %) |
 | `.claude/settings.json` | hooki Claude Code (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`) wywołujące heartbeat; **scalane sumą** z ustawieniami projektu | Claude Code |
-| `monitor/heartbeat.py`, `monitor/taskparse.py` | heartbeat do serwera monitora (tylko stdlib, ASCII; adres i token w `~/.claude/monitor.env`, nigdy w repo); parser `tasks.md` wspólny z `gen_openspec_status.py` | meta-projekt (stan „pracuje / skończył" na żywo) |
+| `monitor/heartbeat.py`, `monitor/taskparse.py` | heartbeat do serwera monitora (tylko stdlib, ASCII; adres i token w `~/.claude/monitor.env`, nigdy w repo); `--event label --label "..."` nadaje nazwę bieżącemu zadaniu (reguła 1.5); parser `tasks.md` wspólny z `gen_openspec_status.py` | meta-projekt (stan „pracuje / czeka / skończył" na żywo, czas i nazwa zadania) |
 | `project_files/python/` (lub `src/`) | kod analityczny | — |
 | `project_files/python/tests/` | testy nazywające porażki | CI / meta-projekt (`pytest -q`) |
 | `project_files/run_files/` | artefakty i logi, **nie w repo** | paczka przenoszenia |
@@ -296,6 +304,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.3 | 2026-09-11 | Reguła 1.5 „nazwa zadania na starcie" (`heartbeat.py --event label`); wiersz sekcji 9 o etykiecie i stanie „czeka"; hooki w `.claude/settings.json` zakotwiczone w `$CLAUDE_PROJECT_DIR` i rozszerzone o `StopFailure` i `Notification`. *Skąd:* zmiana OpenSpec `task-timer-panel` w `project_integration` — monitor liczy czas zadania (prompt → stop) i powiadamia tylko powyżej progu (60 s), więc potrzebuje lakonicznej nazwy w chwili startu; hook z względną ścieżką padł, gdy `cd` narzędzia Bash zmieniło katalog roboczy sesji. |
 | 1.2 | 2026-09-10 | Reguła 2.7 „zero usunięć przed pushem z automatu" (kod wyjścia klonu bez potoku, czysty status, zero `D` w diffie, jawna tożsamość committera). *Skąd:* incydent rollout'u paczki w `project_integration` — płytki klon + połknięty kod błędu = usunięte drzewa w 3 repo, naprawione revertem. |
 | 1.1 | 2026-09-10 | Meta-projekt `project_integration` (zmiana OpenSpec `project-monitor`): sekcja 9 zyskuje `.claude/settings.json` (hooki heartbeat) i `monitor/heartbeat.py` + `taskparse.py`; opis instalacji paczki i synchronizacji tego pliku. *Dlaczego:* bez wspólnych hooków nie ma sygnału „pracuje teraz", a bez jednego parsera `tasks.md` liczba w STATUS.md i na telefonie rozjeżdżają się. |
 | 1.0 | 2026-09-10 | Konsolidacja: CLAUDE.md projektu, reguły `.cursor/rules`, pamięć feedback, wnioski sesji 58–61 (7× błąd kalibracji na innej populacji, heredoc, `assert` przy `replace`, prerejestracja, wielokrotność, prowenienecja, gwarancje konformalne, pół-automat, paczka przenoszenia) |

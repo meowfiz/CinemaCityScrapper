@@ -2,8 +2,12 @@
 heartbeat.py -- Claude Code hook that reports session state to the monitor server.
 
 Called from .claude/settings.json hooks:
-    python monitor/heartbeat.py --event session_start|prompt|tool|stop|session_end
-Claude Code passes hook context as JSON on stdin (session_id, cwd, prompt, ...).
+    python monitor/heartbeat.py --event session_start|prompt|tool|stop|stop_failure|waiting|session_end
+Claude Code passes hook context as JSON on stdin (session_id, cwd, user_input/prompt, prompt_id,
+last_assistant_message, notification_type, error_type, ...).
+
+Called by Claude itself (no stdin) to name the running task for the phone (change task-timer-panel):
+    python monitor/heartbeat.py --event label --label "Parser tasks.md: kontynuacje"
 
 Configuration (never in the repo): ~/.claude/monitor.env with KEY=VALUE lines
     MONITOR_URL          server base URL; required, otherwise exit silently
@@ -36,10 +40,12 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import taskparse  # noqa: E402
 
-EVENTS = ("session_start", "prompt", "tool", "stop", "session_end")
+EVENTS = ("session_start", "prompt", "tool", "stop", "stop_failure", "waiting", "session_end", "label")
 NET_TIMEOUT_S = 2.0
 TOOL_THROTTLE_S = 30.0
 PROMPT_EXCERPT_LEN = 120
+RESULT_EXCERPT_LEN = 120
+LABEL_LEN = 80
 LOG_NAME = "monitor_heartbeat.log"
 
 
@@ -165,28 +171,55 @@ def rtk_tokens(cwd):
         return None
 
 
-def build_event(event, hook, cfg):
+def first_sentence(text, limit):
+    """First sentence of Claude's answer, whitespace collapsed, markdown bullets stripped, cut to limit."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    s = " ".join(text.split()).lstrip("-*# ")
+    for i, ch in enumerate(s):
+        if ch in ".!?" and (i + 1 == len(s) or s[i + 1] == " ") and i >= 8:
+            s = s[:i + 1]
+            break
+    return s[:limit] if s else None
+
+
+def build_event(event, hook, cfg, label=None):
     cwd = hook.get("cwd") or os.getcwd()
     root = repo_root(cwd)
+    wire_event = "stop" if event == "stop_failure" else event
     ev = {
         "repo": repo_name(cwd),
         "machine": cfg.get("MONITOR_MACHINE") or platform.node(),
-        "session_id": hook.get("session_id") or "unknown",
-        "event": event,
+        "session_id": hook.get("session_id") or ("label" if event == "label" else "unknown"),
+        "event": wire_event,
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "ahead": commits_ahead(cwd),
     }
     ev.update(taskparse.describe_repo(root))
+    if hook.get("prompt_id"):
+        ev["prompt_id"] = str(hook["prompt_id"])[:100]
     if event == "prompt" and cfg.get("MONITOR_SEND_PROMPT", "1") != "0":
-        prompt = hook.get("prompt")
+        # Claude Code >= 2.1 sends the text as user_input; older builds as prompt
+        prompt = hook.get("user_input") or hook.get("prompt")
         if isinstance(prompt, str) and prompt.strip():
             ev["prompt_excerpt"] = " ".join(prompt.split())[:PROMPT_EXCERPT_LEN]
-    if event in ("stop", "session_end") and cfg.get("MONITOR_SEND_TOKENS", "1") != "0":
-        tokens = rtk_tokens(cwd)
-        if tokens is not None:
-            ev["tokens"] = tokens
+    if event == "stop":
+        if cfg.get("MONITOR_SEND_TOKENS", "1") != "0":  # not on session_end: 1.5 s hook budget there
+            tokens = rtk_tokens(cwd)
+            if tokens is not None:
+                ev["tokens"] = tokens
+        if cfg.get("MONITOR_SEND_PROMPT", "1") != "0":
+            excerpt = first_sentence(hook.get("last_assistant_message"), RESULT_EXCERPT_LEN)
+            if excerpt:
+                ev["result_excerpt"] = excerpt
+    if event == "stop_failure":
+        ev["error_type"] = str(hook.get("error_type") or "unknown")[:60]
+    if event == "waiting":
+        ev["notification_type"] = str(hook.get("notification_type") or "permission_prompt")[:60]
     if event == "tool" and hook.get("tool_name"):
         ev["tool_name"] = str(hook["tool_name"])[:60]
+    if event == "label":
+        ev["label"] = " ".join(str(label or "").split())[:LABEL_LEN]
     return ev
 
 
@@ -209,6 +242,7 @@ def post(url, token, payload):
 def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--event", required=True, choices=EVENTS)
+    parser.add_argument("--label", default=None)
     args, _ = parser.parse_known_args(argv)
 
     cfg = load_config()
@@ -216,12 +250,14 @@ def main(argv=None):
     token = cfg.get("MONITOR_TOKEN")
     if not url or not token:
         return 0
+    if args.event == "label" and not (args.label or "").strip():
+        return 0
 
-    hook = read_stdin_json()
+    hook = {} if args.event == "label" else read_stdin_json()
     if throttled(args.event, hook.get("session_id")):
         return 0
 
-    payload = build_event(args.event, hook, cfg)
+    payload = build_event(args.event, hook, cfg, label=args.label)
     try:
         status = post(url, token, payload)
         if status >= 300:

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python monitor/heartbeat.py --event session_start || python3 monitor/heartbeat.py --event session_start",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event session_start || python3 \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event session_start",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python monitor/heartbeat.py --event prompt || python3 monitor/heartbeat.py --event prompt",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event prompt || python3 \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event prompt",
             "timeout": 5
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python monitor/heartbeat.py --event tool || python3 monitor/heartbeat.py --event tool",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event tool || python3 \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event tool",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python monitor/heartbeat.py --event stop || python3 monitor/heartbeat.py --event stop",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event stop || python3 \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event stop",
             "timeout": 5
           }
         ]
@@ -50,7 +50,30 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python monitor/heartbeat.py --event session_end || python3 monitor/heartbeat.py --event session_end",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event session_end || python3 \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event session_end",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event stop_failure || python3 \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event stop_failure",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event waiting || python3 \"$CLAUDE_PROJECT_DIR/monitor/heartbeat.py\" --event waiting",
             "timeout": 5
           }
         ]
