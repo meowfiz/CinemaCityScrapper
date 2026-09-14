@@ -54,6 +54,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/monitor/auto_sync.py\" --spawn || python3 \"$CLAUDE_PROJECT_DIR/monitor/auto_sync.py\" --spawn",
+            "timeout": 10,
+            "statusMessage": "auto-sync: commit + push with guards (ZASADY 2.8)"
+          }
+        ]
       }
     ],
     "StopFailure": [
