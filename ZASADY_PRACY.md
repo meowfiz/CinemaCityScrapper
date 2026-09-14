@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.3 (2026-09-11). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.4 (2026-09-14). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -96,6 +96,21 @@ committera podana jawnie (`-c user.email -c user.name`), inaczej `commit`/`rever
 `git add <pliki>` + `commit` zapisał drzewo z częściowego indeksu i push usunął 43 / 2587 / 5009 plików
 w trzech repo na gałęzi domyślnej. Naprawa revertem bez `--force`; wyłapały to dopiero statystyki commita
 („+6 plików" nie pasowało do 304 989 usunięć).
+
+**2.8 Synchronizacja na koniec sesji jest automatyczna, ale bramkowana.** Hook `SessionEnd` uruchamia
+`monitor/auto_sync.py --spawn` (proces odlaczony, hook wraca natychmiast), ktory commituje i pushuje **tylko
+gdy wszystkie bramki trzymaja**: (G1) istnieje notatka `notes/sesje/<dzis>-*.md` zmieniona w drzewie albo
+w ostatnim commicie; (G2) kazda zmieniona sciezka lezy w allowliscie (`notes/`, `openspec/`,
+`project_files/python/`, `monitor/`, `.claude/`, `.cursor/`, `CLAUDE.md`, `ZASADY_PRACY.md`) — artefakty,
+logi i pliki nieznane zatrzymuja commit; (G3) `git diff --name-status <upstream>...HEAD` ma zero wierszy `D`;
+(G4) `pytest -q` zielony; (G5) po `git fetch` upstream jest przodkiem HEAD — inaczej commit zostaje lokalny,
+**nigdy** `pull --rebase` ani `--force` z automatu. Kazdy przebieg dopisuje blok do
+`project_files/run_files/auto_sync.log` i wysyla etykiete heartbeat „auto-sync: pushed | local | skipped
+(powod)", zeby wynik byl widoczny na telefonie. Testy bramek: `project_files/python/tests/test_auto_sync.py`.
+*Dlaczego:* reguła 2.1 chronila przed cichym pushem, ale w praktyce co druga sesja konczyla sie commitem
+lokalnym niewidocznym z drugiej maszyny; automat z bramkami daje widocznosc bez ryzyka z 2.7 (decyzja
+uzytkownika 2026-09-14, sesja 65 RibnXtr2026). 2.1 nadal obowiazuje **w trakcie** sesji: Claude nie pushuje
+na wlasna reke; automat dziala dopiero po zamknieciu sesji.
 
 ---
 
@@ -304,6 +319,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.4 | 2026-09-14 | Reguła 2.8 „synchronizacja na koniec sesji automatyczna, ale bramkowana" (`monitor/auto_sync.py --spawn` z hooka `SessionEnd`; bramki G1–G5: notatka sesji, allowlista sciezek, zero usuniec, pytest, upstream przodkiem HEAD; wynik jako etykieta heartbeat). *Skad:* decyzja uzytkownika w sesji 65 RibnXtr2026 — commity lokalne bez pusha byly niewidoczne z drugiej maszyny, a 2.1 nie pozwalala Claude'owi pushowac; hook `SessionStart` z PowerShell `ConvertTo-Json` dawal „Unterminated string" w aplikacji desktop — zastapiony `monitor/session_context.py` (czysty ASCII JSON). |
 | 1.3 | 2026-09-11 | Reguła 1.5 „nazwa zadania na starcie" (`heartbeat.py --event label`); wiersz sekcji 9 o etykiecie i stanie „czeka"; hooki w `.claude/settings.json` zakotwiczone w `$CLAUDE_PROJECT_DIR` i rozszerzone o `StopFailure` i `Notification`. *Skąd:* zmiana OpenSpec `task-timer-panel` w `project_integration` — monitor liczy czas zadania (prompt → stop) i powiadamia tylko powyżej progu (60 s), więc potrzebuje lakonicznej nazwy w chwili startu; hook z względną ścieżką padł, gdy `cd` narzędzia Bash zmieniło katalog roboczy sesji. |
 | 1.2 | 2026-09-10 | Reguła 2.7 „zero usunięć przed pushem z automatu" (kod wyjścia klonu bez potoku, czysty status, zero `D` w diffie, jawna tożsamość committera). *Skąd:* incydent rollout'u paczki w `project_integration` — płytki klon + połknięty kod błędu = usunięte drzewa w 3 repo, naprawione revertem. |
 | 1.1 | 2026-09-10 | Meta-projekt `project_integration` (zmiana OpenSpec `project-monitor`): sekcja 9 zyskuje `.claude/settings.json` (hooki heartbeat) i `monitor/heartbeat.py` + `taskparse.py`; opis instalacji paczki i synchronizacji tego pliku. *Dlaczego:* bez wspólnych hooków nie ma sygnału „pracuje teraz", a bez jednego parsera `tasks.md` liczba w STATUS.md i na telefonie rozjeżdżają się. |
