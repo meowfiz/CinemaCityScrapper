@@ -121,12 +121,28 @@ def is_blocked(p: str) -> bool:
     return any(p.startswith(pre) for pre in BLOCKED_PREFIXES) or p.endswith(BLOCKED_SUFFIXES)
 
 
+def is_new(status: str) -> bool:
+    """True when `git status --porcelain` says the path is not in HEAD yet: untracked ("??")
+    or added to the index ("A "). Both must pass the allowlist; a modification of an already
+    tracked file is a past human decision and travels with the session."""
+    return status == "??" or status[:1] == "A"
+
+
+def commit_command(paths: list, message: str) -> list:
+    """`git commit -- <paths>` commits exactly those paths and leaves the rest of the index
+    alone. Without the `--`, git commits the WHOLE index, so anything staged before the run
+    (by the user or by a `stash pop`) rides along and silently bypasses G2."""
+    return ["commit", "-q", "-m", message, "--"] + list(paths)
+
+
 def classify(entries: list, allow=None, files=None) -> dict:
     """Split status entries into what to commit, what to leave, what blocks the run (G2)."""
     commit, leave, blocked = [], [], []
     for status, p in entries:
-        if status == "??":
-            # never ADD anything under run_files or outside the allowlist
+        if is_new(status):
+            # not in HEAD yet: never ADD anything under run_files or outside the allowlist.
+            # 'A ' counts as new even though git calls it staged -- `git stash pop` and a plain
+            # `git add` both stage files the automat was never meant to decide about (2026-09-15).
             (commit if is_allowed(p, allow, files) and not is_blocked(p) else leave).append(p)
         elif _norm(p).endswith(BLOCKED_SUFFIXES):
             blocked.append(p)
@@ -226,7 +242,7 @@ def run(root, dry_run=False):
                 git(["add", "-A", "--"] + c["commit"], root, check=True)
                 msg = ("auto-sync %s: session notes and tracked work (ZASADY 2.8)\n\n"
                        "Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>" % today)
-                git(["commit", "-q", "-m", msg], root, check=True)
+                git(commit_command(c["commit"], msg), root, check=True)
                 report.append("committed %s" % git(["rev-parse", "--short", "HEAD"], root))
 
         # push guards
