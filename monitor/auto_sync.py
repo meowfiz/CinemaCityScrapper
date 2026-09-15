@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import json
 import os
 import subprocess
 import sys
@@ -45,6 +46,31 @@ LOG_REL = os.path.join("project_files", "run_files", "auto_sync.log")
 # ---------------------------------------------------------------------------------------------
 # pure decisions (tested in project_files/python/tests/test_auto_sync.py)
 # ---------------------------------------------------------------------------------------------
+
+def resolve_python(root, tests, exists=os.path.exists):
+    """Same command, but run by the interpreter that can actually import the project.
+    A repo-local virtualenv wins over the interpreter running this hook (which on Windows is
+    whatever python Claude Code found -- here anaconda, without the server dependencies)."""
+    if not tests or os.path.basename(tests[0]).lower() not in ("python", "python3", "python.exe", "python3.exe"):
+        return list(tests)
+    for rel in (os.path.join(".venv", "Scripts", "python.exe"), os.path.join(".venv", "bin", "python"),
+                os.path.join("venv", "Scripts", "python.exe"), os.path.join("venv", "bin", "python")):
+        if exists(os.path.join(root, rel)):
+            return [os.path.join(root, rel)] + list(tests[1:])
+    return [sys.executable or tests[0]] + list(tests[1:])
+
+
+def test_paths(tests: list) -> list:
+    """The path-looking arguments of a pytest command, i.e. everything after the last flag
+    that is not itself a flag or a flag value."""
+    skip = {"-m", "-p", "-k", "-o", "--rootdir"}
+    out, prev = [], ""
+    for arg in tests[1:]:
+        if not arg.startswith("-") and prev not in skip and arg != "pytest":
+            out.append(_norm(arg))
+        prev = arg
+    return out
+
 
 def _norm(p: str) -> str:
     return p.replace("\\", "/").strip().strip('"')
@@ -64,9 +90,30 @@ def parse_status(porcelain: str) -> list:
     return out
 
 
-def is_allowed(p: str) -> bool:
+CONFIG_REL = os.path.join(".claude", "auto_sync.json")
+
+
+def load_config(root):
+    """Optional per-repo overrides: {"allow": ["server/", ...], "tests": ["python", "-m", ...]}.
+    Absent or unreadable file = the defaults above, so no repo changes behaviour by accident."""
+    cfg = {"allow": list(ALLOWED_PREFIXES), "files": list(ALLOWED_FILES), "tests": list(TESTS)}
+    try:
+        with open(os.path.join(root, CONFIG_REL), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return cfg
+    if isinstance(data.get("allow"), list):
+        cfg["allow"] = sorted(set(cfg["allow"]) | {_norm(p) for p in data["allow"] if p})
+    if isinstance(data.get("files"), list):
+        cfg["files"] = sorted(set(cfg["files"]) | {_norm(p) for p in data["files"] if p})
+    if isinstance(data.get("tests"), list) and data["tests"]:
+        cfg["tests"] = [str(x) for x in data["tests"]]
+    return cfg
+
+
+def is_allowed(p: str, allow=None, files=None) -> bool:
     p = _norm(p)
-    return p in ALLOWED_FILES or any(p.startswith(pre) for pre in ALLOWED_PREFIXES)
+    return p in (files or ALLOWED_FILES) or any(p.startswith(pre) for pre in (allow or ALLOWED_PREFIXES))
 
 
 def is_blocked(p: str) -> bool:
@@ -74,13 +121,13 @@ def is_blocked(p: str) -> bool:
     return any(p.startswith(pre) for pre in BLOCKED_PREFIXES) or p.endswith(BLOCKED_SUFFIXES)
 
 
-def classify(entries: list) -> dict:
+def classify(entries: list, allow=None, files=None) -> dict:
     """Split status entries into what to commit, what to leave, what blocks the run (G2)."""
     commit, leave, blocked = [], [], []
     for status, p in entries:
         if status == "??":
             # never ADD anything under run_files or outside the allowlist
-            (commit if is_allowed(p) and not is_blocked(p) else leave).append(p)
+            (commit if is_allowed(p, allow, files) and not is_blocked(p) else leave).append(p)
         elif _norm(p).endswith(BLOCKED_SUFFIXES):
             blocked.append(p)
         else:
@@ -101,9 +148,9 @@ def deleted_rows(name_status: str) -> list:
     return [ln for ln in name_status.splitlines() if ln[:1] == "D"]
 
 
-def decide(entries: list, last_commit_paths: list, today: str) -> tuple:
+def decide(entries: list, last_commit_paths: list, today: str, allow=None, files=None) -> tuple:
     """(action, reason, classification). action: 'commit' | 'push-only' | 'skip'."""
-    c = classify(entries)
+    c = classify(entries, allow, files)
     if c["blocked"]:
         return "skip", "G2 tracked artefacts changed: %s" % ", ".join(c["blocked"][:5]), c
     if c["commit"]:
@@ -155,6 +202,7 @@ def heartbeat_label(root, text):
 
 def run(root, dry_run=False):
     today = _dt.date.today().isoformat()
+    cfg = load_config(root)
     report = ["root=%s dry_run=%s" % (root, dry_run)]
     outcome = "skipped"
     try:
@@ -165,7 +213,7 @@ def run(root, dry_run=False):
             return outcome, report
         entries = parse_status(git(["status", "--porcelain"], root, check=True, raw=True))
         last_paths = git(["show", "--pretty=format:", "--name-only", "HEAD"], root).splitlines()
-        action, reason, c = decide(entries, last_paths, today)
+        action, reason, c = decide(entries, last_paths, today, cfg["allow"], cfg["files"])
         report.append("decision=%s (%s)" % (action, reason))
         if c["leave"]:
             report.append("untracked left alone: %d (e.g. %s)" % (len(c["leave"]), ", ".join(c["leave"][:3])))
@@ -199,13 +247,21 @@ def run(root, dry_run=False):
             report.append("G3 deletions vs upstream (%d): %s" % (len(dels), "; ".join(dels[:5])))
             outcome = "local"
             return outcome, report
-        t = subprocess.run(TESTS, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           timeout=900)
-        tail = (t.stdout.strip().splitlines() or [""])[-1]
-        report.append("G4 pytest rc=%d: %s" % (t.returncode, tail))
-        if t.returncode != 0:
-            outcome = "local"
-            return outcome, report
+        missing = [p for p in test_paths(cfg["tests"]) if not os.path.exists(os.path.join(root, p))]
+        if missing and len(missing) == len(test_paths(cfg["tests"])):
+            # a repo with no tests at all: say so, do not fake a green run and do not block
+            # forever on pytest exit code 4 ("no tests ran") -- that killed rule 2.9 here
+            report.append("G4 brak testow (%s) -- pominieta" % ", ".join(missing))
+        else:
+            cmd = resolve_python(root, cfg["tests"])
+            report.append("G4 interpreter: %s" % os.path.basename(cmd[0]))
+            t = subprocess.run(cmd, cwd=root, capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=900)
+            tail = (t.stdout.strip().splitlines() or [""])[-1]
+            report.append("G4 pytest rc=%d: %s" % (t.returncode, tail))
+            if t.returncode != 0:
+                outcome = "local"
+                return outcome, report
         if dry_run:
             report.append("dry-run: would push %s -> %s" % (branch, upstream))
             outcome = "local"
