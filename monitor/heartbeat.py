@@ -33,6 +33,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import platform
 import shutil
 import subprocess
@@ -53,6 +54,8 @@ LABEL_LEN = 80
 LOG_NAME = "monitor_heartbeat.log"
 CONTINUE_WINDOW_S = 120.0  # same window the server uses to treat a prompt as a continuation
 AUTOSYNC_MIN_S = 600.0     # rule 2.9: a task this long ends with a gated commit + push
+AGENT_LABEL_LEN = 60       # Claude Code already cuts a description to 3-5 words; this is a guard
+AGENTS_MAX = 10            # how many background agents one event carries
 
 
 def log(msg):
@@ -240,6 +243,119 @@ def spawn_auto_sync(root):
         return False
 
 
+# -- background agents: what is running when the shell shows nothing (change background-agents) ---
+# Measured on this Claude Code build (2026-09-15): PostToolUse carries tool_name, tool_input and
+# tool_use_id, and the matching task-notification carries the same tool-use-id -- so a background
+# agent can be tracked by identity, start to finish, without parsing the transcript.
+
+def agent_from_tool(tool_name, tool_input, tool_use_id, now):
+    """A registry entry for a tool call that starts background work, else None."""
+    if not tool_use_id:
+        return None
+    ti = tool_input if isinstance(tool_input, dict) else {}
+    if tool_name == "Agent":
+        kind, fallback = "agent", "agent w tle"
+    elif tool_name in ("Bash", "PowerShell") and ti.get("run_in_background"):
+        kind, fallback = "bash", "komenda w tle"
+    else:
+        return None
+    label = " ".join(str(ti.get("description") or "").split())[:AGENT_LABEL_LEN]
+    return {"id": str(tool_use_id)[:100], "kind": kind, "label": label or fallback, "started": now}
+
+
+TOOL_USE_ID_RE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>")
+
+
+def finished_ids(text):
+    """Every tool-use-id named by a task-notification (one can close several background tasks)."""
+    return TOOL_USE_ID_RE.findall(text) if isinstance(text, str) else []
+
+
+def next_agents(state, event, hook, now):
+    """Pure: the registry after this event. Keyed by tool_use_id, so a lost start means one
+    invisible agent and a lost finish means one entry that hangs -- which is exactly what the
+    silence threshold on the server is there to report."""
+    out = dict(state or {})
+    if event == "session_end":
+        return {}
+    if event == "tool":
+        entry = agent_from_tool(hook.get("tool_name"), hook.get("tool_input"), hook.get("tool_use_id"), now)
+        if entry is not None:
+            out[entry["id"]] = entry
+    elif event == "prompt":
+        text = hook.get("user_input") or hook.get("prompt")
+        if is_synthetic_prompt(text):  # a task-notification reaches UserPromptSubmit
+            for tid in finished_ids(text):
+                out.pop(tid, None)
+    return out
+
+
+def agents_payload(state):
+    """The wire form: oldest first, capped, timestamps as ISO like every other field."""
+    out = []
+    for entry in sorted(state.values(), key=lambda e: e.get("started") or 0)[:AGENTS_MAX]:
+        started = entry.get("started")
+        out.append({
+            "id": entry.get("id"),
+            "label": entry.get("label") or "",
+            "kind": entry.get("kind") or "agent",
+            "started_ts": datetime.datetime.fromtimestamp(
+                started or 0, datetime.timezone.utc).isoformat(timespec="seconds"),
+        })
+    return out
+
+
+def agents_path(session_id):
+    return os.path.join(tempfile.gettempdir(), "monitor_agents_%s.json" % (session_id or "nosession"))
+
+
+def read_agents(session_id):
+    try:
+        with open(agents_path(session_id), encoding="utf-8") as f:
+            state = json.load(f)
+        return state if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def track_agents(event, hook, session_id, now=None):
+    """Apply one event to the registry on disk. Returns (wire list, changed, was_empty).
+    Every failure is swallowed: the registry must never break a session."""
+    now = time.time() if now is None else now
+    state = read_agents(session_id)
+    try:
+        new = next_agents(state, event, hook, now)
+    except Exception as e:
+        log("agent registry failed: %r" % (e,))
+        return [], False, True
+    if new != state:
+        path = agents_path(session_id)
+        try:
+            if new:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(new, f)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError as e:
+            log("agent registry write failed: %r" % (e,))
+    return agents_payload(new), new != state, not state
+
+
+def spawn_agent_tick(session_id, cwd):
+    """Start the detached liveness ticker. Starting it twice is harmless: the child takes a lock
+    file and exits at once when another ticker already holds it."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_tick.py")
+    if not os.path.exists(script):
+        return False
+    try:
+        subprocess.run([sys.executable, script, "--session", str(session_id or "nosession"),
+                        "--cwd", cwd, "--spawn"], cwd=cwd, capture_output=True, timeout=5)
+        return True
+    except Exception as e:
+        log("agent tick spawn failed: %r" % (e,))
+        return False
+
+
 def rtk_tokens(cwd):
     """Cumulative RTK token counters for this project (rtk gain --project --format json).
     Returns dict(commands, input, output, saved) or None when rtk is missing or slow.
@@ -286,7 +402,7 @@ def is_synthetic_prompt(text):
     return isinstance(text, str) and text.lstrip().startswith(SYNTHETIC_PROMPT_MARKS)
 
 
-def build_event(event, hook, cfg, label=None):
+def build_event(event, hook, cfg, label=None, agents=None):
     cwd = hook.get("cwd") or os.getcwd()
     root = repo_root(cwd)
     wire_event = "stop" if event == "stop_failure" else event
@@ -326,6 +442,8 @@ def build_event(event, hook, cfg, label=None):
         ev["tool_name"] = str(hook["tool_name"])[:60]
     if event == "label":
         ev["label"] = " ".join(str(label or "").split())[:LABEL_LEN]
+    if agents:  # what is running while the shell shows nothing (change background-agents)
+        ev["agents"] = agents
     return ev
 
 
@@ -366,12 +484,18 @@ def main(argv=None):
         if spawn_auto_sync(repo_root(hook.get("cwd") or os.getcwd())):
             log("auto-sync spawned after a %.0f s task" % duration)
 
+    # Background agents: track them here too, so the registry survives a machine with no monitor.
+    agents, agents_changed, was_empty = track_agents(args.event, hook, hook.get("session_id"))
+    if agents and (was_empty or agents_changed):
+        spawn_agent_tick(hook.get("session_id"), hook.get("cwd") or os.getcwd())
+
     if not url or not token:
         return 0
-    if throttled(args.event, hook.get("session_id")):
+    # a start or a finish of a background agent is the only moment its name is known: never throttle it
+    if agents_changed is False and throttled(args.event, hook.get("session_id")):
         return 0
 
-    payload = build_event(args.event, hook, cfg, label=args.label)
+    payload = build_event(args.event, hook, cfg, label=args.label, agents=agents)
     try:
         status = post(url, token, payload)
         if status >= 300:
