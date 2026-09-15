@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.4 (2026-09-14). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.6 (2026-09-15). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -58,7 +58,7 @@ mówią, co się właściwie skończyło.
 
 ## 2. Git i dwie maszyny
 
-**2.1 Claude nie pushuje bez prośby.** Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
+**2.1 Claude nie pushuje bez prośby** (poza 2.8 i 2.9). Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
 wypchnij / przenoszę się na drugą maszynę", Claude sprawdza `git status -sb` i **albo pushuje na
 prośbę, albo mówi wprost: „commit jest lokalny, nie wypchnięty"**. *Dlaczego:* lokalny commit jest
 niewidoczny z drugiej maszyny; ciche pominięcie kosztuje pół dnia.
@@ -110,7 +110,24 @@ logi i pliki nieznane zatrzymuja commit; (G3) `git diff --name-status <upstream>
 *Dlaczego:* reguła 2.1 chronila przed cichym pushem, ale w praktyce co druga sesja konczyla sie commitem
 lokalnym niewidocznym z drugiej maszyny; automat z bramkami daje widocznosc bez ryzyka z 2.7 (decyzja
 uzytkownika 2026-09-14, sesja 65 RibnXtr2026). 2.1 nadal obowiazuje **w trakcie** sesji: Claude nie pushuje
-na wlasna reke; automat dziala dopiero po zamknieciu sesji.
+na wlasna reke — pushuje ten sam automat, po zamknieciu sesji (tu) albo po zadaniu dluzszym
+niz 10 minut (2.9).
+
+**2.9 Zadanie dłuższe niż 10 minut kończy się commitem i pushem — automatycznie.**
+Hook `Stop` mierzy czas zadania na tej maszynie (`monitor/heartbeat.py`, zegar zadania: prompt
+otwiera, prompt w trakcie tury nie restartuje, `stop` zamyka) i przy `>= MONITOR_AUTOSYNC_MIN_S`
+(domyślnie **600 s**, `0` wyłącza) odpala `monitor/auto_sync.py` — ten sam automat i te same
+bramki **G1–G5** co w 2.8 (notatka sesji z dziś, allowlista ścieżek, zero usunięć, `pytest`,
+upstream przodkiem HEAD). Wynik (`pushed` / `local` / `skipped (powód)`) idzie do
+`project_files/run_files/auto_sync.log` i jako etykieta heartbeat na telefon.
+Obowiązek Claude'a jest jeden i wynika z bramki G1: **zanim zadanie się skończy, notatka sesji
+ma być aktualna** (reguła 1.1) — bez niej automat świadomie nie commituje, więc praca zostaje
+na jednej maszynie. Gdy Claude widzi, że zadanie dobiega końca po dłuższej pracy, uzupełnia
+notatkę i mówi wprost, że push pójdzie sam.
+*Dlaczego:* decyzja użytkownika 2026-09-15 — im dłuższe zadanie, tym większa szansa, że nie ma go
+przy komputerze, a wynik jest mu potrzebny na repo, z drugiej maszyny albo z innego projektu.
+Reguła 2.1 (nie pushuj bez prośby) chroniła przed cichym pushem **decyzji**; tu decyzja jest
+podjęta z góry, a bramki pilnują ryzyka z 2.7.
 
 ---
 
@@ -171,6 +188,10 @@ konfigurację przez **debounce** (dedykowany single-shot `QTimer`, ~300 ms), nie
 **4.9 Bez zmian semantyki, o które nikt nie prosił.** Diagnostyka i refaktor zachowują
 zachowanie. Propozycję zmiany najpierw w tekście. Dotyczy zwłaszcza kalibracji, mapowań,
 progów, orientacji.
+
+**4.10 Tekst z zewnątrz czytamy jako bajty i dekodujemy UTF-8 jawnie.** `sys.stdin.read()`, `subprocess.run(..., text=True)` i `open()` bez `encoding=` używają **kodowej strony konsoli** (cp1250 na polskim Windowsie), a wszystko, co przychodzi z narzędzi i hooków, jest UTF-8. Czytaj `sys.stdin.buffer` i `.decode("utf-8", "replace")`, dopisuj `encoding="utf-8"` do `subprocess` i `open`. *Dlaczego:* 2026-09-15 `monitor/heartbeat.py` przez półtora miesiąca wysyłał każdą polską literę jako dwa znaki mojibake na telefon i do Home Assistant; błąd był niewidoczny, bo JSON parsował się poprawnie, a testy miały `PYTHONIOENCODING=utf-8` w fixture. Test ma **wymuszać** złą stronę kodową (`PYTHONIOENCODING=cp1250`), inaczej niczego nie sprawdza.
+
+**4.11 Nieodwracalna naprawa danych ma warunek akceptacji, nie tylko heurystykę.** Skrypt, który przepisuje zapisane dane (naprawa kodowania, migracja, czyszczenie), musi mieć jawny warunek „to na pewno było zepsute" i zostawiać nietknięte wszystko, co go nie spełnia. *Dlaczego:* przy odwracaniu mojibake para `Ćż` koduje się na poprawny UTF-8 innego znaku — bez listy dopuszczalnych zakresów naprawa zepsułaby poprawny tekst, i to nieodwracalnie.
 
 ---
 
@@ -294,7 +315,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `openspec/changes/*/tasks.md` | zadania `- [ ]` / `- [x]`, wpisy PREREJESTRACJA | meta-projekt (otwarte zadania) |
 | `openspec/STATUS.md` | **generowany** `notes/gen_openspec_status.py` | meta-projekt (postęp %) |
 | `.claude/settings.json` | hooki Claude Code (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`) wywołujące heartbeat; **scalane sumą** z ustawieniami projektu | Claude Code |
-| `monitor/heartbeat.py`, `monitor/taskparse.py` | heartbeat do serwera monitora (tylko stdlib, ASCII; adres i token w `~/.claude/monitor.env`, nigdy w repo); `--event label --label "..."` nadaje nazwę bieżącemu zadaniu (reguła 1.5); parser `tasks.md` wspólny z `gen_openspec_status.py` | meta-projekt (stan „pracuje / czeka / skończył" na żywo, czas i nazwa zadania) |
+| `monitor/heartbeat.py`, `monitor/taskparse.py` | heartbeat do serwera monitora (tylko stdlib, ASCII; adres i token w `~/.claude/monitor.env`, nigdy w repo); `--event label --label "..."` nadaje nazwę bieżącemu zadaniu (reguła 1.5); parser `tasks.md` wspólny z `gen_openspec_status.py`; zegar zadania (prompt → stop) odpala `auto_sync.py` po 10 min (reguła 2.9) | meta-projekt (stan „pracuje / czeka / skończył" na żywo, czas i nazwa zadania) |
 | `project_files/python/` (lub `src/`) | kod analityczny | — |
 | `project_files/python/tests/` | testy nazywające porażki | CI / meta-projekt (`pytest -q`) |
 | `project_files/run_files/` | artefakty i logi, **nie w repo** | paczka przenoszenia |
@@ -319,6 +340,8 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.6 | 2026-09-15 | Reguła 2.9 „zadanie dłuższe niż 10 minut kończy się commitem i pushem — automatycznie" (zegar zadania w `heartbeat.py`, próg `MONITOR_AUTOSYNC_MIN_S` = 600 s, te same bramki G1–G5 co 2.8); 2.1 dostaje odsyłacz „poza 2.8 i 2.9". *Skąd:* decyzja użytkownika — im dłuższe zadanie, tym większa szansa, że nie ma go przy komputerze, a wynik jest potrzebny na repo z drugiej maszyny lub z innego projektu. |
+| 1.5 | 2026-09-15 | Reguły 4.10 „tekst z zewnątrz czytamy jako bajty i dekodujemy UTF-8 jawnie" i 4.11 „nieodwracalna naprawa danych ma warunek akceptacji". *Skąd:* `monitor/heartbeat.py` czytał ładunek hooka przez `sys.stdin.read()`, a `sys.stdin.encoding` na polskim Windowsie to cp1250 — każda polska litera szła na telefon i do HA jako mojibake (28 pól w 7 repo). Naprawa źródła + odwrócenie uszkodzenia w historii (`server/mojibake.py`, run po runie, z listą dopuszczalnych zakresów Unicode). |
 | 1.4 | 2026-09-14 | Reguła 2.8 „synchronizacja na koniec sesji automatyczna, ale bramkowana" (`monitor/auto_sync.py --spawn` z hooka `SessionEnd`; bramki G1–G5: notatka sesji, allowlista sciezek, zero usuniec, pytest, upstream przodkiem HEAD; wynik jako etykieta heartbeat). *Skad:* decyzja uzytkownika w sesji 65 RibnXtr2026 — commity lokalne bez pusha byly niewidoczne z drugiej maszyny, a 2.1 nie pozwalala Claude'owi pushowac; hook `SessionStart` z PowerShell `ConvertTo-Json` dawal „Unterminated string" w aplikacji desktop — zastapiony `monitor/session_context.py` (czysty ASCII JSON). |
 | 1.3 | 2026-09-11 | Reguła 1.5 „nazwa zadania na starcie" (`heartbeat.py --event label`); wiersz sekcji 9 o etykiecie i stanie „czeka"; hooki w `.claude/settings.json` zakotwiczone w `$CLAUDE_PROJECT_DIR` i rozszerzone o `StopFailure` i `Notification`. *Skąd:* zmiana OpenSpec `task-timer-panel` w `project_integration` — monitor liczy czas zadania (prompt → stop) i powiadamia tylko powyżej progu (60 s), więc potrzebuje lakonicznej nazwy w chwili startu; hook z względną ścieżką padł, gdy `cd` narzędzia Bash zmieniło katalog roboczy sesji. |
 | 1.2 | 2026-09-10 | Reguła 2.7 „zero usunięć przed pushem z automatu" (kod wyjścia klonu bez potoku, czysty status, zero `D` w diffie, jawna tożsamość committera). *Skąd:* incydent rollout'u paczki w `project_integration` — płytki klon + połknięty kod błędu = usunięte drzewa w 3 repo, naprawione revertem. |
