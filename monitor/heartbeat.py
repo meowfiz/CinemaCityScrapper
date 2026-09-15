@@ -15,8 +15,12 @@ Configuration (never in the repo): ~/.claude/monitor.env with KEY=VALUE lines
     MONITOR_MACHINE      machine label; default: hostname
     MONITOR_SEND_PROMPT  1 (default) or 0 to omit prompt_excerpt
     MONITOR_SEND_TOKENS  1 (default) or 0 to skip `rtk gain` counters on stop/session_end
+    MONITOR_AUTOSYNC_MIN_S  task length in seconds after which `stop` hands a gated commit + push
+                         to monitor/auto_sync.py (rule 2.9); default 600, 0 disables
 Environment variables of the same names override the file.
 MONITOR_ENV_FILE overrides the location of the env file (tests).
+
+The task clock and rule 2.9 work without MONITOR_URL: they are about git, not about the dashboard.
 
 Contract: this script must never slow down or break a Claude Code session.
 Network timeout 2 s, every error swallowed and logged to
@@ -47,6 +51,8 @@ PROMPT_EXCERPT_LEN = 120
 RESULT_EXCERPT_LEN = 120
 LABEL_LEN = 80
 LOG_NAME = "monitor_heartbeat.log"
+CONTINUE_WINDOW_S = 120.0  # same window the server uses to treat a prompt as a continuation
+AUTOSYNC_MIN_S = 600.0     # rule 2.9: a task this long ends with a gated commit + push
 
 
 def log(msg):
@@ -73,17 +79,31 @@ def load_config():
                 cfg[k.strip()] = v.strip().strip('"').strip("'")
     except OSError:
         pass
-    for k in ("MONITOR_URL", "MONITOR_TOKEN", "MONITOR_MACHINE", "MONITOR_SEND_PROMPT", "MONITOR_SEND_TOKENS"):
+    for k in ("MONITOR_URL", "MONITOR_TOKEN", "MONITOR_MACHINE", "MONITOR_SEND_PROMPT",
+              "MONITOR_SEND_TOKENS", "MONITOR_AUTOSYNC_MIN_S"):
         if os.environ.get(k) is not None:
             cfg[k] = os.environ[k]
     return cfg
 
 
+def autosync_min_s(cfg):
+    """Seconds after which a finished task triggers the gated commit + push; 0 disables it."""
+    try:
+        return float(cfg.get("MONITOR_AUTOSYNC_MIN_S", AUTOSYNC_MIN_S))
+    except (TypeError, ValueError):
+        return AUTOSYNC_MIN_S
+
+
 def read_stdin_json():
+    """Claude Code always writes the hook payload as UTF-8. Read bytes and decode UTF-8
+    explicitly: sys.stdin uses the console code page (cp1250 on a Polish Windows), which turned
+    every 'a with ogonek' into two mojibake characters on the way to the phone (2026-09-15)."""
     try:
         if sys.stdin is None or sys.stdin.isatty():
             return {}
-        raw = sys.stdin.read()
+        stream = getattr(sys.stdin, "buffer", None)
+        raw = stream.read().decode("utf-8", "replace") if stream is not None else sys.stdin.read()
+        raw = raw.lstrip("\ufeff")  # some shells prepend a BOM
         return json.loads(raw) if raw.strip() else {}
     except Exception as e:
         log("stdin parse failed: %r" % (e,))
@@ -93,7 +113,8 @@ def read_stdin_json():
 def git(args, cwd):
     try:
         out = subprocess.run(
-            ["git"] + args, cwd=cwd, capture_output=True, text=True, timeout=3
+            ["git"] + args, cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=3
         )
         if out.returncode != 0:
             return None
@@ -145,6 +166,80 @@ def throttled(event, session_id):
     return False
 
 
+# -- task clock: how long the current task has been running (rule 2.9) ---------------------------
+# The server measures this too, but the hook must decide on its own machine and without a network
+# round trip. The rules are the server's (tasks.py): a prompt arriving less than CONTINUE_WINDOW_S
+# after the last activity was typed mid-turn and continues the task instead of starting a new one.
+
+def next_stamp(stamp, event, now, continue_window_s=CONTINUE_WINDOW_S):
+    """Pure decision: (new stamp or None, finished task duration in seconds or None).
+
+    stamp is {"start": epoch, "last": epoch} or None. A returned stamp is to be stored, None means
+    'forget the task'. The duration is returned only for the event that ends the task."""
+    if event == "prompt":
+        if stamp and now - stamp.get("last", 0) < continue_window_s:
+            return {"start": stamp["start"], "last": now}, None  # mid-turn prompt: same task
+        return {"start": now, "last": now}, None
+    if stamp is None:
+        return None, None
+    if event in ("tool", "waiting", "label"):
+        return {"start": stamp["start"], "last": now}, None
+    if event in ("stop", "stop_failure", "session_end"):
+        return None, max(0.0, now - stamp["start"])
+    return stamp, None
+
+
+def should_autosync(duration_s, min_s):
+    """True when a task ran long enough that the user is probably not at the keyboard (rule 2.9)."""
+    return bool(min_s) and min_s > 0 and duration_s is not None and duration_s >= min_s
+
+
+def task_stamp_path(session_id):
+    return os.path.join(tempfile.gettempdir(), "monitor_task_%s.json" % (session_id or "nosession"))
+
+
+def track_task(event, session_id, now=None):
+    """Read the stamp, apply next_stamp, write it back. Returns the finished duration or None.
+    Every failure is swallowed: the task clock must never break a session."""
+    path = task_stamp_path(session_id)
+    now = time.time() if now is None else now
+    stamp = None
+    try:
+        with open(path, encoding="utf-8") as f:
+            stamp = json.load(f)
+        if not isinstance(stamp, dict) or "start" not in stamp:
+            stamp = None
+    except (OSError, ValueError):
+        pass
+    try:
+        new, duration = next_stamp(stamp, event, now)
+        if new is None:
+            if os.path.exists(path):
+                os.remove(path)
+        elif new != stamp:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(new, f)
+        return duration
+    except Exception as e:
+        log("task clock failed: %r" % (e,))
+        return None
+
+
+def spawn_auto_sync(root):
+    """Hand the gated commit + push to monitor/auto_sync.py (ZASADY 2.8 gates G1-G5) and return
+    at once -- the Stop hook has a budget of a few seconds."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "auto_sync.py")
+    if not os.path.exists(script):
+        return False
+    try:
+        subprocess.run([sys.executable, script, "--root", root, "--spawn"],
+                       cwd=root, capture_output=True, timeout=5)
+        return True
+    except Exception as e:
+        log("auto-sync spawn failed: %r" % (e,))
+        return False
+
+
 def rtk_tokens(cwd):
     """Cumulative RTK token counters for this project (rtk gain --project --format json).
     Returns dict(commands, input, output, saved) or None when rtk is missing or slow.
@@ -156,7 +251,7 @@ def rtk_tokens(cwd):
     try:
         out = subprocess.run(
             [exe, "gain", "--project", "--format", "json"],
-            cwd=cwd, capture_output=True, text=True, timeout=3,
+            cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
         )
         if out.returncode != 0:
             return None
@@ -259,12 +354,20 @@ def main(argv=None):
     cfg = load_config()
     url = cfg.get("MONITOR_URL")
     token = cfg.get("MONITOR_TOKEN")
-    if not url or not token:
-        return 0
     if args.event == "label" and not (args.label or "").strip():
         return 0
 
     hook = {} if args.event == "label" else read_stdin_json()
+
+    # Rule 2.9: a task longer than MONITOR_AUTOSYNC_MIN_S ends with a gated commit + push. Done
+    # before the monitor check on purpose -- this is about git, not about the dashboard.
+    duration = track_task(args.event, hook.get("session_id"))
+    if args.event in ("stop", "stop_failure") and should_autosync(duration, autosync_min_s(cfg)):
+        if spawn_auto_sync(repo_root(hook.get("cwd") or os.getcwd())):
+            log("auto-sync spawned after a %.0f s task" % duration)
+
+    if not url or not token:
+        return 0
     if throttled(args.event, hook.get("session_id")):
         return 0
 
