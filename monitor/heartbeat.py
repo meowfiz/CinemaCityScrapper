@@ -243,6 +243,83 @@ def spawn_auto_sync(root):
         return False
 
 
+# -- which window on which machine hosts this session (change remote-tasks) -----------------------
+# "RibnXtr2026 pracuje" does not say WHERE. With two machines and several windows that is the first
+# thing you need before you can go to the window or close it. Measured on 2026-09-16: the hook's
+# ancestor chain is python -> bash* -> claude.exe -> powershell.exe, so both pids are reachable.
+# Pure ctypes on purpose: a PowerShell/WMI walk costs ~0.5 s, too much even once per session.
+
+CLAUDE_PROCS = ("claude.exe", "claude", "node.exe", "node")
+TERM_PROCS = ("powershell.exe", "pwsh.exe", "cmd.exe", "WindowsTerminal.exe", "conhost.exe",
+              "bash.exe", "zsh", "bash", "wezterm-gui.exe", "alacritty.exe")
+
+
+def _process_parents_windows(pid, limit=12):
+    """[(pid, name)] from pid upwards, via CreateToolhelp32Snapshot. Empty on any failure."""
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.POINTER(ctypes.c_ulong)),
+                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                    ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_char * 260)]
+
+    k32 = ctypes.windll.kernel32
+    snap = k32.CreateToolhelp32Snapshot(0x00000002, 0)  # TH32CS_SNAPPROCESS
+    if snap == -1:
+        return []
+    try:
+        entry = PROCESSENTRY32()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32)
+        table = {}
+        ok = k32.Process32First(snap, ctypes.byref(entry))
+        while ok:
+            table[int(entry.th32ProcessID)] = (int(entry.th32ParentProcessID),
+                                               entry.szExeFile.decode("ascii", "replace"))
+            ok = k32.Process32Next(snap, ctypes.byref(entry))
+    finally:
+        k32.CloseHandle(snap)
+    out = []
+    cur = int(pid)
+    for _ in range(limit):
+        row = table.get(cur)
+        if row is None:
+            break
+        parent, name = row
+        out.append((cur, name))
+        if not parent or parent == cur:
+            break
+        cur = parent
+    return out
+
+
+def process_parents(pid, limit=12):
+    try:
+        if os.name == "nt":
+            return _process_parents_windows(pid, limit)
+    except Exception as e:
+        log("process walk failed: %r" % (e,))
+    return []
+
+
+def window_identity(chain):
+    """Pure: (host_pid, term_pid, term_name) from a [(pid, name)] chain, or Nones.
+    host = the Claude Code process running this session; term = the shell above it."""
+    host_pid = term_pid = None
+    term_name = None
+    for i, (pid, name) in enumerate(chain):
+        if host_pid is None and name.lower() in [p.lower() for p in CLAUDE_PROCS]:
+            host_pid = pid
+            for pid2, name2 in chain[i + 1:]:
+                if name2.lower() in [p.lower() for p in TERM_PROCS]:
+                    term_pid, term_name = pid2, name2
+                    break
+            break
+    return host_pid, term_pid, term_name
+
+
 # -- background agents: what is running when the shell shows nothing (change background-agents) ---
 # Measured on this Claude Code build (2026-09-15): PostToolUse carries tool_name, tool_input and
 # tool_use_id, and the matching task-notification carries the same tool-use-id -- so a background
@@ -444,6 +521,13 @@ def build_event(event, hook, cfg, label=None, agents=None):
         ev["label"] = " ".join(str(label or "").split())[:LABEL_LEN]
     if agents:  # what is running while the shell shows nothing (change background-agents)
         ev["agents"] = agents
+    if event == "session_start":  # once per session: the window this session lives in
+        host_pid, term_pid, term_name = window_identity(process_parents(os.getpid()))
+        if host_pid:
+            ev["host_pid"] = host_pid
+        if term_pid:
+            ev["term_pid"] = term_pid
+            ev["term_name"] = str(term_name or "")[:60]
     return ev
 
 
@@ -473,6 +557,11 @@ def main(argv=None):
     url = cfg.get("MONITOR_URL")
     token = cfg.get("MONITOR_TOKEN")
     if args.event == "label" and not (args.label or "").strip():
+        return 0
+    # A headless `claude -p` started by ask_worker.py runs the same hooks in the same repo and would
+    # show up as one more window on the machines view (seen 2026-09-16). It reports through the
+    # inbox already, so it is not a session worth tracking here.
+    if os.environ.get("MONITOR_HEADLESS") == "1":
         return 0
 
     hook = {} if args.event == "label" else read_stdin_json()
