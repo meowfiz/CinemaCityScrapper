@@ -139,6 +139,83 @@ def context_block(lines):
               "PYTANIE: ")
 
 
+# -- state digest: hand the model what it would otherwise hunt for ------------------------------
+# Both projects reached the same idea independently (ask-core 3.x here, poc-carplay-command 2.7 in
+# the car bridge), so it lives here once. Built IN MEMORY on every call: reading four small files
+# costs milliseconds, while a file written into the repo would need an allowlist entry, would get
+# committed, and would be stale exactly when it matters.
+
+DIGEST_MAX_BYTES = 4000
+_SECTION_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
+
+
+def _read(path, limit=8000):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read(limit)
+    except OSError:
+        return ""
+
+
+def _first_section(text):
+    """The first '## ...' section of a document -- in notes/start.md that is 'Ostatnia sesja'."""
+    if not text:
+        return ""
+    marks = [m.start() for m in _SECTION_RE.finditer(text)]
+    if not marks:
+        return text.strip()
+    # skip a leading document title ('# START') and take the first real section, up to the next one
+    start = marks[1] if (marks[0] == 0 and len(marks) > 1) else marks[0]
+    nxt = [m for m in marks if m > start]
+    return (text[start:nxt[0]] if nxt else text[start:]).strip()
+
+
+def digest(path, max_bytes=DIGEST_MAX_BYTES, git_runner=None):
+    """A compact state block for one repository, or '' when there is nothing to say.
+
+    Sources are the ones a person would open first, in that order: the newest session summary,
+    the generated OpenSpec status, the current change and its first open task, the last commits."""
+    name = os.path.basename(str(path).rstrip("\\/"))
+    parts = []
+    head = _first_section(_read(os.path.join(path, "notes", "start.md")))
+    if head:
+        parts.append("Z notes/start.md:\n" + head)
+    status = _read(os.path.join(path, "openspec", "STATUS.md"), 2000)
+    line = next((ln for ln in status.splitlines() if "tasks complete" in ln or "Overall" in ln), "")
+    if line:
+        parts.append("Z openspec/STATUS.md: " + line.strip().lstrip("*# "))
+    try:
+        import taskparse  # the same parser the monitor uses -- never a second list
+        ctx = taskparse.describe_repo(path)
+        if ctx.get("change"):
+            parts.append("Biezaca zmiana: %s (%s/%s zadan). Pierwsze otwarte: %s" % (
+                ctx["change"], ctx.get("done"), ctx.get("total"), (ctx.get("task") or "-")[:200]))
+    except Exception:
+        pass
+    g = git_runner or _git
+    try:
+        log = g(["log", "-3", "--format=%h %ad %s", "--date=short"], path, 10).stdout.strip()
+        if log:
+            parts.append("Ostatnie commity:\n" + log)
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    if not parts:
+        return ""
+    body = ("STAN REPOZYTORIUM %s (przygotowany przez most, nie szukaj tego w plikach):\n\n" % name
+            + "\n\n".join(parts))
+    return body[:max_bytes]
+
+
+def digest_block(paths, max_bytes=DIGEST_MAX_BYTES, git_runner=None):
+    """Digests of every repository, sharing the byte budget so one repo cannot eat the prompt."""
+    paths = [p for p in (paths or []) if os.path.isdir(p)]
+    if not paths:
+        return ""
+    each = max(500, max_bytes // len(paths))
+    blocks = [d for d in (digest(p, each, git_runner) for p in paths) if d]
+    return ("\n\n".join(blocks) + "\n\n") if blocks else ""
+
+
 # -- length asked for in the question (from monitor) -------------------------------------------
 
 _SENTENCE_LIMIT_RE = re.compile(
@@ -190,7 +267,7 @@ def build_command(exe, paths, system, model=None, allow=None, deny=None):
 
 
 def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, runner=None,
-        context=None, allow=None, deny=None, env=None):
+        context=None, allow=None, deny=None, env=None, use_digest=False):
     """(answer, error). Never raises: a failed answer is a reported error, not a dead caller.
 
     paths[0] is the working directory, the rest are handed over with --add-dir, so one question can
@@ -204,7 +281,9 @@ def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, run
     if not exe:
         return None, "claude CLI not found on PATH"
 
-    stdin_text = (context_block(context) if context else "") + (question or "")
+    stdin_text = ((digest_block(paths) if use_digest else "")
+                  + (context_block(context) if context else "")
+                  + (question or ""))
     cmd = build_command(exe, paths, system, model, allow, deny)
     run = runner or subprocess.run
     # the headless run fires the repo's hooks too; heartbeat.py must not count it as an open window
