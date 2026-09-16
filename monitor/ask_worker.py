@@ -249,16 +249,22 @@ ALL_REPOS = "*"  # the phone asks across every repo this machine has, not one na
 
 
 def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_paths=(),
-            refresh=True):
+            refresh=True, use_digest=True):
     """(answer, error) for one queued question. A thin client of ask_core (change ask-core): the
     call itself, the freshness pull and the sentence limit live there, shared with the car bridge.
 
     refresh=True is the Car contribution the monitor lacked: without it an answer can be based on a
-    checkout from days ago and nothing says so."""
+    checkout from days ago and nothing says so.
+
+    use_digest=True by measurement, not by hope: the pre-registered run of 2026-09-16 (10 questions,
+    interleaved) moved the median from 18,4 s to 12,3 s (-33%), 9 of 10 pairs faster, concrete facts
+    kept in 10/10 answers. It missed the declared 40%, so it is a partial result, and the tail barely
+    moved (p90 26,1 -> 22,9 s) -- the queue path takes it because six seconds of median is worth
+    having; the car path decides on its own numbers."""
     paths = [repo_path] + [p for p in extra_paths if p and p != repo_path]
     context = ask_core.refresh_all(paths) if refresh else None
     return ask_core.ask(paths, question, system=system_prompt(), timeout=timeout_s,
-                        runner=runner, context=context)
+                        runner=runner, context=context, use_digest=use_digest)
 
 
 def resolve_paths(repo, repo_map):
