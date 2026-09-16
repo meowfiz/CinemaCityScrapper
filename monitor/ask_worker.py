@@ -210,8 +210,10 @@ def system_prompt():
     repo instead (measured: a probe with a newline answered 'NIE'). The question itself goes through
     stdin, so it can be any length and contain anything."""
     return (
-        "Jestes asystentem stanu repozytorium; uzytkownik pyta z telefonu, odpowiadaj po polsku. "
+        "Jestes asystentem stanu repozytoriow; uzytkownik pyta z telefonu, odpowiadaj po polsku. "
         "Odpowiadaj NA ZADANE PYTANIE, nie streszczaj repozytorium, chyba ze o to prosi. "
+        "Jesli masz dostep do kilku repozytoriow (--add-dir), pytanie moze dotyczyc dowolnego z nich "
+        "albo wszystkich naraz -- wtedy najpierw ustal, ktore sa istotne, i nazwij je w odpowiedzi. "
         "DLUGOSC: jesli pytanie okresla dlugosc (np. 'w 2 zdaniach', 'jednym zdaniem', 'krotko'), "
         "trzymaj sie jej scisle -- to ma pierwszenstwo przed kompletnoscia; inaczej maks. 6 zdan. "
         "Bez naglowka, bez listy zrodel, bez numerowanych punktow, chyba ze pytanie o nie prosi. "
@@ -252,8 +254,13 @@ def cut_sentences(text, n):
     return " ".join(parts[:n]).strip() if len(parts) > n else text.strip()
 
 
-def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None):
-    """(answer, error). Never raises: a failed answer is a reported error, not a dead worker."""
+ALL_REPOS = "*"  # the phone asks across every repo this machine has, not one named repo
+
+
+def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_paths=()):
+    """(answer, error). Never raises: a failed answer is a reported error, not a dead worker.
+    extra_paths are handed to the agent with --add-dir, so one question can span every repo on the
+    machine -- the worker already has them all, so limiting it to one was an artificial narrowing."""
     exe = shutil.which("claude")
     if not exe:
         return None, "claude CLI not found on PATH"
@@ -262,6 +269,9 @@ def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None):
     # no newline may ever sit inside an argv element (claude.CMD / cmd.exe); the question goes via stdin
     cmd = [exe, "-p", "--append-system-prompt", " ".join(system_prompt().split()),
            "--allowed-tools", READ_ONLY_TOOLS]
+    for path in extra_paths:
+        if os.path.isdir(path) and path != repo_path:
+            cmd += ["--add-dir", path]
     # the headless run fires the repo's hooks too; this tells heartbeat.py not to count it as a window
     env = dict(os.environ, MONITOR_HEADLESS="1")
     try:
@@ -281,19 +291,30 @@ def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None):
     return (text[:ANSWER_MAX] if text else None), (None if text else "empty answer")
 
 
+def resolve_paths(repo, repo_map):
+    """(cwd, extra_paths) for one item. ALL_REPOS spans every repo this machine has; the newest
+    path first, so the agent's working directory is the repo most likely to be asked about."""
+    if repo == ALL_REPOS:
+        paths = [p for p in repo_map.values() if os.path.isdir(p)]
+        paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        return (paths[0], paths[1:]) if paths else (None, [])
+    return repo_map.get(repo), []
+
+
 def handle(cfg, item, repo_map, runner=None):
     """Answer one claimed item and report the result. Returns the outcome string."""
     repo = item.get("repo")
-    path = repo_map.get(repo)
     if item.get("kind") != "ask":
         api(cfg, "POST", "/api/inbox/%d/answer" % item["id"], {"error": "unsupported kind"})
         return "unsupported"
+    path, extra = resolve_paths(repo, repo_map)
     if not path:
         api(cfg, "POST", "/api/inbox/%d/answer" % item["id"],
-            {"error": "repo %s is not on this machine (see ~/.claude/monitor_repos.env)" % repo})
+            {"error": ("brak repozytoriow na tej maszynie (~/.claude/monitor_repos.env)" if repo == ALL_REPOS
+                       else "repo %s is not on this machine (see ~/.claude/monitor_repos.env)" % repo)})
         return "unknown-repo"
     answer, error = run_ask(path, item.get("text") or "", _float(cfg, "MONITOR_ASK_TIMEOUT_S",
-                                                                 ANSWER_TIMEOUT_S), runner)
+                                                                ANSWER_TIMEOUT_S), runner, extra)
     api(cfg, "POST", "/api/inbox/%d/answer" % item["id"],
         {"answer": answer} if answer else {"error": error or "no answer"})
     return "answered" if answer else "failed"
