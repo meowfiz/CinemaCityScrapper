@@ -101,6 +101,27 @@ def spawn_detached():
     subprocess.Popen(args, **kw)
 
 
+def lock_pid(path=None):
+    try:
+        data = json.loads(open(path or lock_path(), encoding="utf-8").read())
+        return int(data.get("pid") or 0) or None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def restart(cfg, kill=os.kill):
+    """A running worker keeps the code it started with; after a pack update it must be replaced.
+    Terminate the pid from the lock, drop the lock, start a fresh one. Returns the ensure_running outcome."""
+    pid = lock_pid()
+    if pid and pid != os.getpid():
+        try:
+            kill(pid, 15)  # SIGTERM; TerminateProcess on Windows
+        except OSError:
+            pass  # already gone
+    drop_lock()
+    return ensure_running(cfg)
+
+
 def ensure_running(cfg, now=None):
     """Start the worker unless one is alive. Returns 'running' | 'spawned' | 'no-config'."""
     if not cfg.get("MONITOR_URL") or not cfg.get("MONITOR_TOKEN"):
@@ -185,7 +206,10 @@ def answer_prompt(question):
     """The instruction the headless agent gets. Read-only is enforced by --allowed-tools as well;
     saying it here too keeps the answer honest instead of promising an edit it cannot make."""
     return (
-        "Odpowiedz po polsku, zwiezle (maks. 6 zdan), na pytanie o stan tego repozytorium. "
+        "Odpowiedz po polsku na pytanie o stan tego repozytorium. "
+        "DLUGOSC: jesli pytanie okresla dlugosc (np. 'w 2 zdaniach', 'jednym zdaniem', 'krotko'), "
+        "trzymaj sie jej scisle -- to ma pierwszenstwo przed kompletnoscia; inaczej maks. 6 zdan. "
+        "Bez naglowka, bez listy zrodel, bez numerowanych punktow, chyba ze pytanie o nie prosi. "
         "Masz dostep TYLKO do odczytu: nie zmieniaj plikow, nie commituj, nie uruchamiaj testow. "
         "Jesli czegos nie da sie ustalic z plikow, napisz to wprost zamiast zgadywac. "
         "Zrodla w kolejnosci: notes/start.md, notes/sesje/, openspec/STATUS.md, "
@@ -269,9 +293,13 @@ def main(argv=None):
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--spawn", action="store_true", help="start detached unless one is running")
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--restart", action="store_true", help="replace the running worker (after a pack update)")
     args, _ = ap.parse_known_args(argv)
 
     cfg = heartbeat.load_config()
+    if args.restart:
+        print(restart(cfg))
+        return 0
     if args.status:
         live = lock_is_live(lock_path(), time.time(), _float(cfg, "MONITOR_ASK_POLL_S", POLL_S))
         print("worker: %s (%s)" % ("dziala" if live else "nie dziala", lock_path()))
