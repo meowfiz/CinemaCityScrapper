@@ -33,6 +33,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -217,6 +218,31 @@ def answer_prompt(question):
     )
 
 
+_SENTENCE_LIMIT_RE = re.compile(
+    r"\b(?:w|do|max\.?|maks\.?|maksymalnie)\s+(\d{1,2})\s+zdani(?:a|ach|u)\b|\bjednym zdaniem\b|\bw jednym zdaniu\b",
+    re.IGNORECASE)
+# Polish capitals as escapes: the pack is ASCII-only (rule 4.1)
+_SENTENCE_END_RE = re.compile(
+    "(?<=[.!?])\\s+(?=[A-Z\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b0-9`*_\"'(\\[])")
+
+
+def sentence_limit(question):
+    """The number of sentences the question asks for, or None. Deterministic, so the promise made
+    in the panel ('w 2 zdaniach') is kept even when the model does not keep it (panel #5, 2026-09-16)."""
+    m = _SENTENCE_LIMIT_RE.search(question or "")
+    if not m:
+        return None
+    return int(m.group(1)) if m.group(1) else 1
+
+
+def cut_sentences(text, n):
+    """First n sentences of the answer; a split never happens inside a code span or a number."""
+    if not text or not n or n <= 0:
+        return text
+    parts = _SENTENCE_END_RE.split(text.strip())
+    return " ".join(parts[:n]).strip() if len(parts) > n else text.strip()
+
+
 def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None):
     """(answer, error). Never raises: a failed answer is a reported error, not a dead worker."""
     exe = shutil.which("claude")
@@ -238,6 +264,9 @@ def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None):
     if out.returncode != 0:
         return None, ("claude exited %d: %s" % (out.returncode, (out.stderr or "").strip()))[:1000]
     text = (out.stdout or "").strip()
+    limit = sentence_limit(question)
+    if limit and text:
+        text = cut_sentences(text, limit)
     return (text[:ANSWER_MAX] if text else None), (None if text else "empty answer")
 
 
