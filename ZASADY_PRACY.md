@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.6 (2026-09-15). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.7 (2026-09-16). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -100,16 +100,22 @@ w trzech repo na gałęzi domyślnej. Naprawa revertem bez `--force`; wyłapały
 **2.8 Synchronizacja na koniec sesji jest automatyczna, ale bramkowana.** Hook `SessionEnd` uruchamia
 `monitor/auto_sync.py --spawn` (proces odlaczony, hook wraca natychmiast), ktory commituje i pushuje **tylko
 gdy wszystkie bramki trzymaja**: (G1) istnieje notatka `notes/sesje/<dzis>-*.md` zmieniona w drzewie albo
-w ostatnim commicie; (G2) kazda zmieniona sciezka lezy w allowliscie (`notes/`, `openspec/`,
+w ostatnim commicie; (G2) żadna **nowa** ścieżka źródłowa nie zostaje poza commitem w katalogu, do którego commitujemy źródła (inaczej idzie połowa zmiany i drzewo się nie uruchamia); każda zmieniona sciezka lezy w allowliscie (`notes/`, `openspec/`,
 `project_files/python/`, `monitor/`, `.claude/`, `.cursor/`, `CLAUDE.md`, `ZASADY_PRACY.md`) — artefakty,
 logi i pliki nieznane zatrzymuja commit; (G3) `git diff --name-status <upstream>...HEAD` ma zero wierszy `D`;
-(G4) `pytest -q` zielony; (G5) po `git fetch` upstream jest przodkiem HEAD — inaczej commit zostaje lokalny,
-**nigdy** `pull --rebase` ani `--force` z automatu. Kazdy przebieg dopisuje blok do
+(G4) `pytest -q` zielony; (G5) po `git fetch` upstream jest przodkiem HEAD; **gdy nie jest, automat robi
+`git pull --rebase --autostash` i próbuje pushu ponownie** — rebase musi zastosować się czysto,
+a po nim **G3 i G4 są sprawdzane od nowa**, na nowym drzewie. Konflikt = `rebase --abort`,
+commit zostaje lokalny i raport mówi, które pliki rozjeżdżają się. **Nigdy `--force`.**
+Per repo można to wyłączyć: `{"rebase": false}` w `.claude/auto_sync.json`.
+
+Kazdy przebieg dopisuje blok do
 `project_files/run_files/auto_sync.log` i wysyla etykiete heartbeat „auto-sync: pushed | local | skipped
 (powod)", zeby wynik byl widoczny na telefonie. Testy bramek: `project_files/python/tests/test_auto_sync.py`.
 *Dlaczego:* reguła 2.1 chronila przed cichym pushem, ale w praktyce co druga sesja konczyla sie commitem
 lokalnym niewidocznym z drugiej maszyny; automat z bramkami daje widocznosc bez ryzyka z 2.7 (decyzja
-uzytkownika 2026-09-14, sesja 65 RibnXtr2026). 2.1 nadal obowiazuje **w trakcie** sesji: Claude nie pushuje
+uzytkownika 2026-09-14, sesja 65 RibnXtr2026). Rebase z automatu doszło 2026-09-16 (decyzja użytkownika: „nie ma sensu trzymać commitów niewypchniętych”) — to jest dokładnie ruch, który przepisuje reguła 2.3, a jedyną część wymagającą człowieka („obejrzeć, co tam jest”) automat sprawdza mechanicznie: czysty rebase, zero usunięć, zielone testy.
+2.1 nadal obowiazuje **w trakcie** sesji: Claude nie pushuje
 na wlasna reke — pushuje ten sam automat, po zamknieciu sesji (tu) albo po zadaniu dluzszym
 niz 10 minut (2.9).
 
@@ -340,6 +346,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.7 | 2026-09-16 | Reguła 2.8: po lokalnym commicie automat **rebase'uje na upstream i pushuje** (czysty rebase, ponowne G3 i G4, konflikt → `abort` i commit lokalny, nigdy `--force`; wyłącznik `{"rebase": false}`). Bramka G2 zatrzymuje commit, gdy nowy plik źródłowy zostaje poza nim w katalogu, do którego commitujemy źródła. *Skąd:* decyzja użytkownika „nie ma sensu trzymać commitów niewypchniętych”; oraz znalezisko sesji Car — auto-sync wypchnął zmodyfikowany `poc/ask_server.py` bez nowych `poc/intent.py` i `poc/aliases.json`, czyli drzewo z `ImportError`, które pecet w pracy pobrałby `git pull` co godzinę, a watchdog restartowałby w milczeniu. |
 | 1.6 | 2026-09-15 | Reguła 2.9 „zadanie dłuższe niż 10 minut kończy się commitem i pushem — automatycznie" (zegar zadania w `heartbeat.py`, próg `MONITOR_AUTOSYNC_MIN_S` = 600 s, te same bramki G1–G5 co 2.8); 2.1 dostaje odsyłacz „poza 2.8 i 2.9". *Skąd:* decyzja użytkownika — im dłuższe zadanie, tym większa szansa, że nie ma go przy komputerze, a wynik jest potrzebny na repo z drugiej maszyny lub z innego projektu. |
 | 1.5 | 2026-09-15 | Reguły 4.10 „tekst z zewnątrz czytamy jako bajty i dekodujemy UTF-8 jawnie" i 4.11 „nieodwracalna naprawa danych ma warunek akceptacji". *Skąd:* `monitor/heartbeat.py` czytał ładunek hooka przez `sys.stdin.read()`, a `sys.stdin.encoding` na polskim Windowsie to cp1250 — każda polska litera szła na telefon i do HA jako mojibake (28 pól w 7 repo). Naprawa źródła + odwrócenie uszkodzenia w historii (`server/mojibake.py`, run po runie, z listą dopuszczalnych zakresów Unicode). |
 | 1.4 | 2026-09-14 | Reguła 2.8 „synchronizacja na koniec sesji automatyczna, ale bramkowana" (`monitor/auto_sync.py --spawn` z hooka `SessionEnd`; bramki G1–G5: notatka sesji, allowlista sciezek, zero usuniec, pytest, upstream przodkiem HEAD; wynik jako etykieta heartbeat). *Skad:* decyzja uzytkownika w sesji 65 RibnXtr2026 — commity lokalne bez pusha byly niewidoczne z drugiej maszyny, a 2.1 nie pozwalala Claude'owi pushowac; hook `SessionStart` z PowerShell `ConvertTo-Json` dawal „Unterminated string" w aplikacji desktop — zastapiony `monitor/session_context.py` (czysty ASCII JSON). |
