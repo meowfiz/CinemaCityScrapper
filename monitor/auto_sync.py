@@ -39,6 +39,10 @@ ALLOWED_FILES = ("CLAUDE.md", "ZASADY_PRACY.md", ".gitignore")
 BLOCKED_PREFIXES = ("project_files/run_files/", "notes/user_tasks/")
 BLOCKED_SUFFIXES = (".log", ".tmp")
 NOTE_DIR = "notes/sesje/"
+# --untracked-files=all: plain `git status --porcelain` collapses a NEW directory to one row
+# ("?? notes/sesje/"), so the first session note of a repo never matched NOTE_DIR + today and gate
+# G1 refused to sync exactly the repo that had just started keeping notes (HA repo, 2026-09-16).
+STATUS_ARGS = ["status", "--porcelain", "--untracked-files=all"]
 TESTS = ["python", "-m", "pytest", "-q", "project_files/python/tests"]
 LOG_REL = os.path.join("project_files", "run_files", "auto_sync.log")
 
@@ -227,7 +231,7 @@ def run(root, dry_run=False):
         if not upstream:
             report.append("skip: no upstream for %s" % branch)
             return outcome, report
-        entries = parse_status(git(["status", "--porcelain"], root, check=True, raw=True))
+        entries = parse_status(git(STATUS_ARGS, root, check=True, raw=True))
         last_paths = git(["show", "--pretty=format:", "--name-only", "HEAD"], root).splitlines()
         action, reason, c = decide(entries, last_paths, today, cfg["allow"], cfg["files"])
         report.append("decision=%s (%s)" % (action, reason))
