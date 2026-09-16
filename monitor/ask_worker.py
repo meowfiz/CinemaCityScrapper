@@ -43,6 +43,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ask_core  # noqa: E402
 import heartbeat  # noqa: E402
 
 POLL_S = 30.0
@@ -204,29 +205,19 @@ def claim(cfg, limit=1):
 
 
 def system_prompt():
-    """Instructions for the headless agent, as ONE line: they travel in --append-system-prompt, and
-    on Windows `claude` is claude.CMD -- cmd.exe cuts an argument at the first newline. That is how
-    every question of 2026-09-16 was lost: the model saw only the instruction and summarised the
-    repo instead (measured: a probe with a newline answered 'NIE'). The question itself goes through
-    stdin, so it can be any length and contain anything."""
-    return (
-        "Jestes asystentem stanu repozytoriow; uzytkownik pyta z telefonu, odpowiadaj po polsku. "
-        "Odpowiadaj NA ZADANE PYTANIE, nie streszczaj repozytorium, chyba ze o to prosi. "
-        "Jesli masz dostep do kilku repozytoriow (--add-dir), pytanie moze dotyczyc dowolnego z nich "
-        "albo wszystkich naraz -- wtedy najpierw ustal, ktore sa istotne, i nazwij je w odpowiedzi. "
-        "DLUGOSC: jesli pytanie okresla dlugosc (np. 'w 2 zdaniach', 'jednym zdaniem', 'krotko'), "
-        "trzymaj sie jej scisle -- to ma pierwszenstwo przed kompletnoscia; inaczej maks. 6 zdan. "
-        "Bez naglowka, bez listy zrodel, bez numerowanych punktow, chyba ze pytanie o nie prosi. "
-        "Masz dostep TYLKO do odczytu: nie zmieniaj plikow, nie commituj, nie uruchamiaj testow. "
-        "Jesli czegos nie da sie ustalic z plikow, napisz to wprost zamiast zgadywac. "
-        "Zrodla w kolejnosci: notes/start.md, najnowsza notatka w notes/sesje/, openspec/STATUS.md, "
-        "openspec/changes/*/tasks.md, notes/HANDOFF_*.md."
-    )
+    """Instructions for the headless agent. The phone wording is the core's default; the car bridge
+    passes its own (three sentences, no markdown) -- that is a product difference, not a technical one."""
+    return ask_core.DEFAULT_SYSTEM
 
 
 def answer_prompt(question):
     """Kept for callers and tests: the full instruction + question as one text."""
     return system_prompt() + "\n\nPytanie: " + question
+
+
+# re-exported so the worker's own tests and callers keep one import (the logic lives in ask_core)
+sentence_limit = ask_core.sentence_limit
+cut_sentences = ask_core.cut_sentences
 
 
 _SENTENCE_LIMIT_RE = re.compile(
@@ -257,38 +248,17 @@ def cut_sentences(text, n):
 ALL_REPOS = "*"  # the phone asks across every repo this machine has, not one named repo
 
 
-def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_paths=()):
-    """(answer, error). Never raises: a failed answer is a reported error, not a dead worker.
-    extra_paths are handed to the agent with --add-dir, so one question can span every repo on the
-    machine -- the worker already has them all, so limiting it to one was an artificial narrowing."""
-    exe = shutil.which("claude")
-    if not exe:
-        return None, "claude CLI not found on PATH"
-    if not os.path.isdir(repo_path):
-        return None, "repo path does not exist: %s" % repo_path
-    # no newline may ever sit inside an argv element (claude.CMD / cmd.exe); the question goes via stdin
-    cmd = [exe, "-p", "--append-system-prompt", " ".join(system_prompt().split()),
-           "--allowed-tools", READ_ONLY_TOOLS]
-    for path in extra_paths:
-        if os.path.isdir(path) and path != repo_path:
-            cmd += ["--add-dir", path]
-    # the headless run fires the repo's hooks too; this tells heartbeat.py not to count it as a window
-    env = dict(os.environ, MONITOR_HEADLESS="1")
-    try:
-        run = runner or subprocess.run
-        out = run(cmd, input=question, cwd=repo_path, capture_output=True, text=True,
-                  encoding="utf-8", errors="replace", timeout=timeout_s, env=env)
-    except subprocess.TimeoutExpired:
-        return None, "timeout after %.0f s" % timeout_s
-    except Exception as e:
-        return None, "runner failed: %r" % (e,)
-    if out.returncode != 0:
-        return None, ("claude exited %d: %s" % (out.returncode, (out.stderr or "").strip()))[:1000]
-    text = (out.stdout or "").strip()
-    limit = sentence_limit(question)
-    if limit and text:
-        text = cut_sentences(text, limit)
-    return (text[:ANSWER_MAX] if text else None), (None if text else "empty answer")
+def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_paths=(),
+            refresh=True):
+    """(answer, error) for one queued question. A thin client of ask_core (change ask-core): the
+    call itself, the freshness pull and the sentence limit live there, shared with the car bridge.
+
+    refresh=True is the Car contribution the monitor lacked: without it an answer can be based on a
+    checkout from days ago and nothing says so."""
+    paths = [repo_path] + [p for p in extra_paths if p and p != repo_path]
+    context = ask_core.refresh_all(paths) if refresh else None
+    return ask_core.ask(paths, question, system=system_prompt(), timeout=timeout_s,
+                        runner=runner, context=context)
 
 
 def resolve_paths(repo, repo_map):
