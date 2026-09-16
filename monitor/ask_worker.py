@@ -203,19 +203,28 @@ def claim(cfg, limit=1):
         urllib.parse.quote(machine_name(cfg)), limit)).get("items", [])
 
 
-def answer_prompt(question):
-    """The instruction the headless agent gets. Read-only is enforced by --allowed-tools as well;
-    saying it here too keeps the answer honest instead of promising an edit it cannot make."""
+def system_prompt():
+    """Instructions for the headless agent, as ONE line: they travel in --append-system-prompt, and
+    on Windows `claude` is claude.CMD -- cmd.exe cuts an argument at the first newline. That is how
+    every question of 2026-09-16 was lost: the model saw only the instruction and summarised the
+    repo instead (measured: a probe with a newline answered 'NIE'). The question itself goes through
+    stdin, so it can be any length and contain anything."""
     return (
-        "Odpowiedz po polsku na pytanie o stan tego repozytorium. "
+        "Jestes asystentem stanu repozytorium; uzytkownik pyta z telefonu, odpowiadaj po polsku. "
+        "Odpowiadaj NA ZADANE PYTANIE, nie streszczaj repozytorium, chyba ze o to prosi. "
         "DLUGOSC: jesli pytanie okresla dlugosc (np. 'w 2 zdaniach', 'jednym zdaniem', 'krotko'), "
         "trzymaj sie jej scisle -- to ma pierwszenstwo przed kompletnoscia; inaczej maks. 6 zdan. "
         "Bez naglowka, bez listy zrodel, bez numerowanych punktow, chyba ze pytanie o nie prosi. "
         "Masz dostep TYLKO do odczytu: nie zmieniaj plikow, nie commituj, nie uruchamiaj testow. "
         "Jesli czegos nie da sie ustalic z plikow, napisz to wprost zamiast zgadywac. "
-        "Zrodla w kolejnosci: notes/start.md, notes/sesje/, openspec/STATUS.md, "
-        "openspec/changes/*/tasks.md.\n\nPytanie: " + question
+        "Zrodla w kolejnosci: notes/start.md, najnowsza notatka w notes/sesje/, openspec/STATUS.md, "
+        "openspec/changes/*/tasks.md, notes/HANDOFF_*.md."
     )
+
+
+def answer_prompt(question):
+    """Kept for callers and tests: the full instruction + question as one text."""
+    return system_prompt() + "\n\nPytanie: " + question
 
 
 _SENTENCE_LIMIT_RE = re.compile(
@@ -250,12 +259,14 @@ def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None):
         return None, "claude CLI not found on PATH"
     if not os.path.isdir(repo_path):
         return None, "repo path does not exist: %s" % repo_path
-    cmd = [exe, "-p", answer_prompt(question), "--allowed-tools", READ_ONLY_TOOLS]
+    # no newline may ever sit inside an argv element (claude.CMD / cmd.exe); the question goes via stdin
+    cmd = [exe, "-p", "--append-system-prompt", " ".join(system_prompt().split()),
+           "--allowed-tools", READ_ONLY_TOOLS]
     # the headless run fires the repo's hooks too; this tells heartbeat.py not to count it as a window
     env = dict(os.environ, MONITOR_HEADLESS="1")
     try:
         run = runner or subprocess.run
-        out = run(cmd, cwd=repo_path, capture_output=True, text=True,
+        out = run(cmd, input=question, cwd=repo_path, capture_output=True, text=True,
                   encoding="utf-8", errors="replace", timeout=timeout_s, env=env)
     except subprocess.TimeoutExpired:
         return None, "timeout after %.0f s" % timeout_s
