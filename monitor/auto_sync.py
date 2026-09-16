@@ -100,7 +100,8 @@ CONFIG_REL = os.path.join(".claude", "auto_sync.json")
 def load_config(root):
     """Optional per-repo overrides: {"allow": ["server/", ...], "tests": ["python", "-m", ...]}.
     Absent or unreadable file = the defaults above, so no repo changes behaviour by accident."""
-    cfg = {"allow": list(ALLOWED_PREFIXES), "files": list(ALLOWED_FILES), "tests": list(TESTS)}
+    cfg = {"allow": list(ALLOWED_PREFIXES), "files": list(ALLOWED_FILES), "tests": list(TESTS),
+           "rebase": True}  # an unpushed commit is invisible from the other machine (2.8, 2026-09-16)
     try:
         with open(os.path.join(root, CONFIG_REL), encoding="utf-8") as f:
             data = json.load(f)
@@ -112,6 +113,8 @@ def load_config(root):
         cfg["files"] = sorted(set(cfg["files"]) | {_norm(p) for p in data["files"] if p})
     if isinstance(data.get("tests"), list) and data["tests"]:
         cfg["tests"] = [str(x) for x in data["tests"]]
+    if isinstance(data.get("rebase"), bool):
+        cfg["rebase"] = data["rebase"]
     return cfg
 
 
@@ -161,6 +164,32 @@ def classify(entries: list, allow=None, files=None) -> dict:
     return {"commit": commit, "leave": leave, "blocked": blocked}
 
 
+# A commit can pass every gate and still push a tree that does not run. Found by the Car session,
+# 2026-09-16: `poc/ask_server.py` was tracked, so its edit was committed, while the brand-new
+# `poc/intent.py` and `poc/aliases.json` it imports were left alone (poc/ is outside the allowlist).
+# The work PC pulls hourly, would have taken an ask_server.py importing a missing module, and the
+# watchdog would have restarted it silently. Half a change is worse than none: stop instead.
+RISKY_SUFFIXES = (".py", ".json", ".yaml", ".yml", ".ps1", ".sh", ".js", ".ts", ".css", ".html", ".sql")
+
+
+def _dirname(p: str) -> str:
+    n = _norm(p)
+    return n.rsplit("/", 1)[0] if "/" in n else ""
+
+
+def risky_leftovers(commit: list, leave: list) -> list:
+    """New source files sitting in a directory we are committing source into, left outside the
+    allowlist. Deliberately narrow: only source-like next to source-like, same directory, so a
+    stray backup next to a committed .gitignore does not stop the sync."""
+    dirs = {_dirname(p) for p in commit if _norm(p).endswith(RISKY_SUFFIXES)}
+    out = []
+    for p in leave:
+        n = _norm(p)
+        if not is_blocked(n) and n.endswith(RISKY_SUFFIXES) and _dirname(n) in dirs:
+            out.append(n)
+    return sorted(out)
+
+
 def has_today_note(paths: list, today: str) -> bool:
     """G1 on a list of paths (changed in tree or in the last commit)."""
     prefix = NOTE_DIR + today
@@ -180,6 +209,11 @@ def decide(entries: list, last_commit_paths: list, today: str, allow=None, files
     if c["commit"]:
         if not has_today_note(c["commit"], today) and not has_today_note(last_commit_paths, today):
             return "skip", "G1 no session note for %s" % today, c
+        risky = risky_leftovers(c["commit"], c["leave"])
+        if risky:
+            return "skip", ("G2 new source next to committed source would be left behind: %s "
+                            "-- add its prefix to .claude/auto_sync.json or move the files"
+                            % ", ".join(risky[:5])), c
         return "commit", "%d paths to commit, %d untracked left alone" % (len(c["commit"]), len(c["leave"])), c
     if has_today_note(last_commit_paths, today):
         return "push-only", "tree clean, last commit carries the session note", c
@@ -263,9 +297,26 @@ def run(root, dry_run=False):
             outcome = "local"
             return outcome, report
         if behind != "0":
-            report.append("G5 upstream moved (behind %s): commit stays local, pull --rebase by hand" % behind)
-            outcome = "local"
-            return outcome, report
+            # An unpushed commit is invisible from the other machine, so leaving it local is not a
+            # safe default -- it is a lost commit waiting to happen (user decision 2026-09-16).
+            # Rule 2.3 already prescribes the safe move: fetch, look, then pull --rebase (autostash),
+            # never --force. The automat can do the "look" mechanically: the rebase must apply
+            # cleanly, and afterwards G3 and G4 are re-checked against the NEW tree, because a push
+            # of a rebase nobody tested is exactly what G4 exists to prevent.
+            if cfg["rebase"] and not dry_run:
+                ok, note = rebase_onto_upstream(root)
+                report.append("G5 upstream moved (behind %s): %s" % (behind, note))
+                if not ok:
+                    outcome = "local"
+                    return outcome, report
+                behind = git(["rev-list", "--count", "HEAD..%s" % upstream], root) or "0"
+                ahead = git(["rev-list", "--count", "%s..HEAD" % upstream], root) or "0"
+                report.append("po rebase: ahead=%s behind=%s" % (ahead, behind))
+            else:
+                report.append("G5 upstream moved (behind %s): commit stays local (rebase off%s)"
+                              % (behind, ", dry-run" if dry_run else ""))
+                outcome = "local"
+                return outcome, report
         dels = deleted_rows(git(["diff", "--name-status", "%s...HEAD" % upstream], root))
         if dels:
             report.append("G3 deletions vs upstream (%d): %s" % (len(dels), "; ".join(dels[:5])))
@@ -300,6 +351,35 @@ def run(root, dry_run=False):
     except Exception as e:  # never break a session end
         report.append("error: %r" % (e,))
         return outcome, report
+
+
+def rebase_outcome(rc, conflicts):
+    """Pure: (ok, note) for a `git pull --rebase --autostash` result. A conflict is not a failure to
+    hide -- it is the one case a human has to look at, so the commit stays local and says why."""
+    if rc == 0 and not conflicts:
+        return True, "pull --rebase czysty, probuje push"
+    if conflicts:
+        return False, "KONFLIKT przy rebase (%s) -- commit zostaje lokalny, rozwiaz recznie" % (
+            ", ".join(conflicts[:3]))
+    return False, "pull --rebase nieudany (rc=%s) -- commit zostaje lokalny" % rc
+
+
+def git_rc(args, cwd):
+    """(returncode, stdout) -- git() swallows the code, and here the code is the decision."""
+    r = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    return r.returncode, r.stdout
+
+
+def rebase_onto_upstream(root):
+    """pull --rebase --autostash, aborting cleanly on conflict so the tree is never left mid-rebase."""
+    rc, _ = git_rc(["pull", "--rebase", "--autostash"], root)
+    conflicts = [ln for ln in git(["diff", "--name-only", "--diff-filter=U"], root).splitlines()
+                 if ln.strip()]
+    ok, note = rebase_outcome(rc, conflicts)
+    if not ok:
+        git(["rebase", "--abort"], root)  # harmless when no rebase is in progress
+    return ok, note
 
 
 def spawn_detached(root):
