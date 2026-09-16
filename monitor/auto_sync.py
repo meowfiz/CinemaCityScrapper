@@ -37,7 +37,7 @@ import sys
 ALLOWED_PREFIXES = ("notes/", "openspec/", "project_files/python/", "monitor/", ".cursor/", ".claude/")
 ALLOWED_FILES = ("CLAUDE.md", "ZASADY_PRACY.md", ".gitignore")
 BLOCKED_PREFIXES = ("project_files/run_files/", "notes/user_tasks/")
-BLOCKED_SUFFIXES = (".log", ".tmp")
+BLOCKED_SUFFIXES = (".log", ".tmp", ".pyc", ".pyo")
 NOTE_DIR = "notes/sesje/"
 # --untracked-files=all: plain `git status --porcelain` collapses a NEW directory to one row
 # ("?? notes/sesje/"), so the first session note of a repo never matched NOTE_DIR + today and gate
@@ -122,6 +122,10 @@ def is_allowed(p: str, allow=None, files=None) -> bool:
 
 def is_blocked(p: str) -> bool:
     p = _norm(p)
+    # __pycache__ anywhere: with --untracked-files=all a .pyc under an allowlisted monitor/ would
+    # otherwise ride along (it did, HA repo 2026-09-16, commit 7a8b601 -- reverted by hand)
+    if "__pycache__/" in p or p.startswith("__pycache__"):
+        return True
     return any(p.startswith(pre) for pre in BLOCKED_PREFIXES) or p.endswith(BLOCKED_SUFFIXES)
 
 
