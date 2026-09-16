@@ -17,6 +17,8 @@ Configuration (never in the repo): ~/.claude/monitor.env with KEY=VALUE lines
     MONITOR_SEND_TOKENS  1 (default) or 0 to skip `rtk gain` counters on stop/session_end
     MONITOR_AUTOSYNC_MIN_S  task length in seconds after which `stop` hands a gated commit + push
                          to monitor/auto_sync.py (rule 2.9); default 600, 0 disables
+    MONITOR_ASK_AUTOSTART 1 (default): session_start registers this repo in ~/.claude/monitor_repos.env
+                         and starts monitor/ask_worker.py on this machine unless one runs; 0 disables
 Environment variables of the same names override the file.
 MONITOR_ENV_FILE overrides the location of the env file (tests).
 
@@ -83,7 +85,8 @@ def load_config():
     except OSError:
         pass
     for k in ("MONITOR_URL", "MONITOR_TOKEN", "MONITOR_MACHINE", "MONITOR_SEND_PROMPT",
-              "MONITOR_SEND_TOKENS", "MONITOR_AUTOSYNC_MIN_S"):
+              "MONITOR_SEND_TOKENS", "MONITOR_AUTOSYNC_MIN_S", "MONITOR_ASK_AUTOSTART",
+              "MONITOR_ASK_POLL_S"):
         if os.environ.get(k) is not None:
             cfg[k] = os.environ[k]
     return cfg
@@ -433,6 +436,29 @@ def spawn_agent_tick(session_id, cwd):
         return False
 
 
+def ensure_ask_worker(cfg, repo, root):
+    """SessionStart: make this repo answerable from the phone and make sure one worker runs here.
+    The user's rule, 2026-09-16: whichever window opens first starts the worker, every later window
+    sees it is there and leaves it alone. MONITOR_ASK_AUTOSTART=0 switches it off."""
+    if cfg.get("MONITOR_ASK_AUTOSTART", "1") == "0":
+        return None
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ask_worker.py")
+    if not os.path.exists(script):
+        return None
+    try:
+        sys.path.insert(0, os.path.dirname(script))
+        import ask_worker  # noqa: E402  (sibling module of the pack)
+        if ask_worker.register_repo(repo, root):
+            log("ask worker: registered %s=%s" % (repo, root))
+        outcome = ask_worker.ensure_running(cfg)
+        if outcome == "spawned":
+            log("ask worker: spawned on this machine")
+        return outcome
+    except Exception as e:
+        log("ask worker autostart failed: %r" % (e,))
+        return None
+
+
 def rtk_tokens(cwd):
     """Cumulative RTK token counters for this project (rtk gain --project --format json).
     Returns dict(commands, input, output, saved) or None when rtk is missing or slow.
@@ -572,6 +598,10 @@ def main(argv=None):
     if args.event in ("stop", "stop_failure") and should_autosync(duration, autosync_min_s(cfg)):
         if spawn_auto_sync(repo_root(hook.get("cwd") or os.getcwd())):
             log("auto-sync spawned after a %.0f s task" % duration)
+
+    if args.event == "session_start":  # first window on the machine starts the phone-question worker
+        cwd0 = hook.get("cwd") or os.getcwd()
+        ensure_ask_worker(cfg, repo_name(cwd0), repo_root(cwd0))
 
     # Background agents: track them here too, so the registry survives a machine with no monitor.
     agents, agents_changed, was_empty = track_agents(args.event, hook, hook.get("session_id"))
