@@ -36,6 +36,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -48,6 +49,89 @@ ANSWER_TIMEOUT_S = 180.0
 READ_ONLY_TOOLS = "Read,Grep,Glob"
 REPOS_FILE = os.path.join(os.path.expanduser("~"), ".claude", "monitor_repos.env")
 ANSWER_MAX = 4000
+
+
+# -- one worker per machine, started by whichever Claude Code window comes first -------------------
+# The SessionStart hook calls `ask_worker.py --spawn`. The first call on a machine starts the loop
+# detached; every later call finds a live lock and returns at once. A worker that dies stops
+# touching the lock, so after LOCK_STALE_POLLS polls the next window starts a fresh one.
+
+LOCK_STALE_POLLS = 3
+
+
+def lock_path():
+    return os.path.join(tempfile.gettempdir(), "monitor_ask_worker.lock")
+
+
+def lock_is_live(path, now, poll_s, read=None):
+    """Pure apart from the injected reader: is another worker alive on this machine?"""
+    try:
+        raw = read(path) if read else open(path, encoding="utf-8").read()
+        data = json.loads(raw)
+    except (OSError, ValueError, TypeError):
+        return False
+    if not isinstance(data, dict) or data.get("pid") == os.getpid():
+        return False
+    return (now - float(data.get("at") or 0)) < poll_s * LOCK_STALE_POLLS
+
+
+def touch_lock(now):
+    try:
+        with open(lock_path(), "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(), "at": now, "machine": platform.node()}, f)
+    except OSError:
+        pass
+
+
+def drop_lock():
+    try:
+        os.remove(lock_path())
+    except OSError:
+        pass
+
+
+def spawn_detached():
+    args = [sys.executable, os.path.abspath(__file__), "--serve"]
+    kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+          "close_fds": True, "cwd": os.path.expanduser("~")}
+    if os.name == "nt":
+        kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    else:
+        kw["start_new_session"] = True
+    subprocess.Popen(args, **kw)
+
+
+def ensure_running(cfg, now=None):
+    """Start the worker unless one is alive. Returns 'running' | 'spawned' | 'no-config'."""
+    if not cfg.get("MONITOR_URL") or not cfg.get("MONITOR_TOKEN"):
+        return "no-config"
+    if lock_is_live(lock_path(), time.time() if now is None else now, _float(cfg, "MONITOR_ASK_POLL_S", POLL_S)):
+        return "running"
+    spawn_detached()
+    return "spawned"
+
+
+def register_repo(name, path, map_path=None):
+    """Add repo=path to the machine's map unless present. Called by the SessionStart hook, so a repo
+    becomes answerable on a machine the first time a window is opened in it -- no manual list."""
+    target = map_path or os.environ.get("MONITOR_REPOS_FILE") or REPOS_FILE
+    if not name or not path or not os.path.isdir(path):
+        return False
+    current = load_repo_map(target)
+    if current.get(name) == path:
+        return False
+    lines = []
+    try:
+        with open(target, encoding="utf-8") as f:
+            lines = [ln.rstrip("\n") for ln in f]
+    except OSError:
+        pass
+    lines = [ln for ln in lines if not ln.strip().startswith(name + "=")]
+    lines.append("%s=%s" % (name, path))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines).strip("\n") + "\n")
+    return True
 
 
 def load_repo_map(path=None):
@@ -154,7 +238,12 @@ def handle(cfg, item, repo_map, runner=None):
 def serve(cfg, once=False, sleep=time.sleep, runner=None):
     poll_s = _float(cfg, "MONITOR_ASK_POLL_S", POLL_S)
     handled = 0
+    if not once and lock_is_live(lock_path(), time.time(), poll_s):
+        return 0  # another worker owns this machine
+    heartbeat.log("ask worker started pid=%d" % os.getpid())
     while True:
+        if not once:
+            touch_lock(time.time())  # a stale lock is how the next window knows to restart us
         repo_map = load_repo_map()  # re-read each pass: a repo can be added without a restart
         try:
             items = claim(cfg)
@@ -178,9 +267,18 @@ def main(argv=None):
     ap.add_argument("--serve", action="store_true")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--spawn", action="store_true", help="start detached unless one is running")
+    ap.add_argument("--status", action="store_true")
     args, _ = ap.parse_known_args(argv)
 
     cfg = heartbeat.load_config()
+    if args.status:
+        live = lock_is_live(lock_path(), time.time(), _float(cfg, "MONITOR_ASK_POLL_S", POLL_S))
+        print("worker: %s (%s)" % ("dziala" if live else "nie dziala", lock_path()))
+        return 0
+    if args.spawn:
+        print(ensure_running(cfg))
+        return 0
     if args.list:
         repo_map = load_repo_map()
         print("machine: %s" % machine_name(cfg))
@@ -191,7 +289,11 @@ def main(argv=None):
     if not cfg.get("MONITOR_URL") or not cfg.get("MONITOR_TOKEN"):
         print("MONITOR_URL / MONITOR_TOKEN missing in ~/.claude/monitor.env")
         return 0
-    n = serve(cfg, once=args.once or not args.serve)
+    try:
+        n = serve(cfg, once=args.once or not args.serve)
+    finally:
+        if args.serve:
+            drop_lock()
     print("obsluzone: %d" % n)
     return 0
 
