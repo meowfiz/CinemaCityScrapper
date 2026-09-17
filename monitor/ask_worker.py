@@ -44,10 +44,15 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ask_core  # noqa: E402
+import capabilities  # noqa: E402
 import heartbeat  # noqa: E402
 
 POLL_S = 30.0
 ANSWER_TIMEOUT_S = 180.0
+# change project-orchestrator, phase A: the server counts three missed beats as death,
+# so the beat must not be able to hold the loop for longer than one poll.
+BEAT_TIMEOUT_S = 10.0
+WORKER_VERSION = "1.1"
 READ_ONLY_TOOLS = "Read,Grep,Glob"
 REPOS_FILE = os.path.join(os.path.expanduser("~"), ".claude", "monitor_repos.env")
 ANSWER_MAX = 4000
@@ -204,6 +209,37 @@ def claim(cfg, limit=1):
         urllib.parse.quote(machine_name(cfg)), limit)).get("items", [])
 
 
+def beat_payload(cfg, repo_map, caps=None, running=0):
+    """What this worker tells the server about itself (change project-orchestrator, phase A).
+
+    Until now the server learned this worker exists only when an answer arrived, so a machine
+    with no open Claude Code window was invisible even while the worker ran on it.
+    """
+    paths = [p for p in (repo_map or {}).values() if p]
+    return {
+        "machine": machine_name(cfg),
+        "kind": "ask",
+        "hostname": platform.node(),
+        "os": platform.system(),
+        "version": WORKER_VERSION,
+        "project_ids": sorted((repo_map or {}).keys()),
+        "capabilities": list(caps) if caps is not None else capabilities.detect(paths),
+        "capacity": 1,          # one headless agent at a time; questions are answered in turn
+        "running": int(running),
+    }
+
+
+def send_beat(cfg, repo_map, caps=None, running=0):
+    """Never raises: a server that is down must not stop a worker from answering questions."""
+    try:
+        api(cfg, "POST", "/api/workers/heartbeat", beat_payload(cfg, repo_map, caps, running),
+            timeout=BEAT_TIMEOUT_S)
+        return True
+    except Exception as e:  # noqa: BLE001
+        heartbeat.log("ask worker heartbeat failed: %r" % (e,))
+        return False
+
+
 def system_prompt():
     """Instructions for the headless agent. The phone wording is the core's default; the car bridge
     passes its own (three sentences, no markdown) -- that is a product difference, not a technical one."""
@@ -302,10 +338,16 @@ def serve(cfg, once=False, sleep=time.sleep, runner=None):
     if not once and lock_is_live(lock_path(), time.time(), poll_s):
         return 0  # another worker owns this machine
     heartbeat.log("ask worker started pid=%d" % os.getpid())
+    # Capabilities are probed once per process, not per poll: 'docker info' costs seconds and the
+    # answer does not change while the worker runs (design D7).
+    caps = None
     while True:
         if not once:
             touch_lock(time.time())  # a stale lock is how the next window knows to restart us
         repo_map = load_repo_map()  # re-read each pass: a repo can be added without a restart
+        if caps is None:
+            caps = capabilities.detect([p for p in repo_map.values() if p])
+        send_beat(cfg, repo_map, caps)  # same loop as the claim: no second thread, no second timer
         try:
             items = claim(cfg)
         except Exception as e:
