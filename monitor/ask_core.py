@@ -32,27 +32,45 @@ import subprocess
 import threading
 from datetime import datetime
 
+# The worker processes that call into this module (ask_worker.py, execute_worker.py) run
+# DETACHED -- no console of their own. Every child that IS a console app (git, claude.CMD) then
+# gets a brand new, visible console window, because Windows has nothing to inherit into. Found
+# live (2026-09-17): a user watched "a bunch of black windows" flash on screen for one question.
+# CREATE_NO_WINDOW is the standard fix; a no-op dict everywhere but Windows.
+QUIET_SUBPROCESS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
 ALLOW_TOOLS = ["Read", "Glob", "Grep", "Bash(git log:*)", "Bash(git status:*)",
                "Bash(git show:*)", "Bash(git diff:*)"]
 DENY_TOOLS = ["Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch",
               "Bash(git push:*)", "Bash(git commit:*)", "Bash(git add:*)", "Task"]
 ANSWER_MAX = 4000
-SPEECH_MAX = 700
+SPEECH_MAX = 1100
 DEFAULT_TIMEOUT_S = 180.0
 PULL_TIMEOUT_S = 30.0
 
 DEFAULT_SYSTEM = (
-    "Jestes asystentem stanu repozytoriow; uzytkownik pyta z telefonu albo z auta, odpowiadaj po polsku. "
-    "Odpowiadaj NA ZADANE PYTANIE, nie streszczaj repozytorium, chyba ze o to prosi. "
-    "Jesli masz dostep do kilku repozytoriow (--add-dir), pytanie moze dotyczyc dowolnego z nich albo "
-    "wszystkich naraz -- ustal, ktore sa istotne, i nazwij je w odpowiedzi. "
-    "DLUGOSC: jesli pytanie okresla dlugosc (np. 'w 2 zdaniach', 'jednym zdaniem', 'krotko'), trzymaj "
-    "sie jej scisle -- to ma pierwszenstwo przed kompletnoscia; inaczej maks. 6 zdan. "
-    "Bez naglowka, bez listy zrodel, bez numerowanych punktow, chyba ze pytanie o nie prosi. "
+    "Jestes madrym, oczytanym rozmowca, ktory zna te projekty od srodka. Odpowiadasz po polsku, "
+    "a Twoja odpowiedz jest CZYTANA NA GLOS -- piszesz wiec pelnymi, plynnymi zdaniami, tak jak "
+    "mowi czlowiek, ktory rozumie temat i umie go wytlumaczyc. "
+    "Masz opowiedziec tak, zeby zrozumial i programista, i ktos zupelnie spoza branzy: najpierw "
+    "sens, potem szczegol. Termin fachowy mozesz uzyc, ale wtedy wyjasnij go w tym samym zdaniu. "
+    "SENS PRZED STANEM: gdy pytanie brzmi czym jest projekt, co robi, do czego sluzy albo jakie ma "
+    "glowne zadanie -- nie raportuj postepu prac. Przeczytaj README, dokumentacje i kod, zrozum, "
+    "JAKI PROBLEM ten projekt rozwiazuje, DLA KOGO i JAK z grubsza dziala, i to opowiedz wlasnymi "
+    "slowami. Opis ostatniego commita nie jest odpowiedzia na pytanie, czym jest projekt. "
+    "POMIJAJ SZUM TECHNICZNY: zadnych skrotow commitow, nazw galezi, sciezek do plikow, nazw "
+    "funkcji, numerow zadan ani procentow ukonczenia -- chyba ze pytanie dotyczy wprost wlasnie "
+    "tego. Na glos takie rzeczy sa nie do sluchania. "
+    "Odpowiadaj NA ZADANE PYTANIE. Jesli masz dostep do kilku repozytoriow (--add-dir), ustal, "
+    "ktore sa istotne, i nazwij je po ludzku. "
+    "DLUGOSC: jesli pytanie okresla dlugosc (np. 'w 2 zdaniach', 'krotko'), trzymaj sie jej scisle "
+    "-- to ma pierwszenstwo przed kompletnoscia; inaczej od trzech do szesciu zdan, spojnym akapitem. "
+    "Bez naglowkow, bez numerowanych punktow, bez list ani markdownu -- to ma byc mowa, nie notatka. "
     "Masz dostep TYLKO do odczytu: nie zmieniaj plikow, nie commituj, nie uruchamiaj testow. "
-    "Jesli czegos nie da sie ustalic z plikow, napisz to wprost zamiast zgadywac. "
-    "Zrodla w kolejnosci: notes/start.md, najnowsza notatka w notes/sesje/, openspec/STATUS.md, "
-    "openspec/changes/*/tasks.md, notes/HANDOFF_*.md."
+    "Jesli czegos nie da sie ustalic, powiedz to wprost jednym zdaniem zamiast zgadywac. "
+    "Gdzie szukac: czym projekt jest -- README, dokumentacja, kod, openspec/changes/*/proposal.md; "
+    "co sie w nim teraz dzieje -- notes/start.md, najnowsza notatka w notes/sesje/, "
+    "openspec/STATUS.md, notes/HANDOFF_*.md."
 )
 
 
@@ -62,7 +80,8 @@ def _git(args, cwd, timeout):
     env = dict(os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"  # never hang on a credential prompt, nobody is watching
     return subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout, env=env)
+                          encoding="utf-8", errors="replace", timeout=timeout, env=env,
+                          **QUIET_SUBPROCESS)
 
 
 def age_phrase(iso, now=None):
@@ -242,10 +261,23 @@ def cut_sentences(text, n):
 
 
 def for_speech(text, limit=SPEECH_MAX):
-    """Strip what a loudspeaker cannot say: code blocks, markdown marks, then squeeze whitespace."""
+    """Strip what a loudspeaker cannot say: code blocks, markdown marks, then squeeze whitespace.
+
+    Truncation cuts on a sentence boundary, never mid-word: a voice that stops in the middle of
+    a word sounds broken, while a slightly shorter answer that ends on a period sounds finished.
+    """
     text = re.sub(r"```.*?```", " ", text or "", flags=re.S)
     text = re.sub(r"[*_`#>|\[\]]", " ", text)
-    return re.sub(r"\s+", " ", text).strip()[:limit]
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    cut = max(head.rfind(". "), head.rfind("! "), head.rfind("? "))
+    if cut >= limit // 2:
+        return head[:cut + 1]
+    head = head[:limit - 3]
+    cut = head.rfind(" ")
+    return (head[:cut] if cut > 0 else head).rstrip(",;: ") + "..."
 
 
 # -- the call ------------------------------------------------------------------------------------
@@ -290,7 +322,8 @@ def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, run
     run_env = dict(env or os.environ, MONITOR_HEADLESS="1")
     try:
         out = run(cmd, input=stdin_text, cwd=paths[0], capture_output=True, text=True,
-                  encoding="utf-8", errors="replace", timeout=timeout, env=run_env)
+                  encoding="utf-8", errors="replace", timeout=timeout, env=run_env,
+                  **QUIET_SUBPROCESS)
     except subprocess.TimeoutExpired:
         return None, "timeout after %.0f s" % timeout
     except Exception as exc:
