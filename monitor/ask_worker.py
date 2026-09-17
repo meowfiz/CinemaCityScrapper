@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ask_core  # noqa: E402
 import capabilities  # noqa: E402
 import heartbeat  # noqa: E402
+import live_sessions  # noqa: E402
 
 POLL_S = 30.0
 ANSWER_TIMEOUT_S = 180.0
@@ -240,6 +241,23 @@ def send_beat(cfg, repo_map, caps=None, running=0):
         return False
 
 
+def send_windows(cfg, lister=None):
+    """Report which Claude Code windows are open here (stream C), alongside the heartbeat.
+
+    Deliberately a separate call from the beat: asking the CLI costs a subprocess and can be
+    slow, and a worker that cannot enumerate windows must still be registered as alive. Never
+    raises, for the same reason send_beat does not.
+    """
+    try:
+        windows = (lister or live_sessions.list_windows)()
+        api(cfg, "POST", "/api/windows",
+            {"machine": machine_name(cfg), "windows": windows}, timeout=BEAT_TIMEOUT_S)
+        return len(windows)
+    except Exception as e:  # noqa: BLE001
+        heartbeat.log("ask worker windows report failed: %r" % (e,))
+        return 0
+
+
 def system_prompt():
     """Instructions for the headless agent. The phone wording is the core's default; the car bridge
     passes its own (three sentences, no markdown) -- that is a product difference, not a technical one."""
@@ -348,6 +366,7 @@ def serve(cfg, once=False, sleep=time.sleep, runner=None):
         if caps is None:
             caps = capabilities.detect([p for p in repo_map.values() if p])
         send_beat(cfg, repo_map, caps)  # same loop as the claim: no second thread, no second timer
+        send_windows(cfg)               # which Claude Code windows are open here (stream C)
         try:
             items = claim(cfg)
         except Exception as e:
