@@ -34,6 +34,13 @@ import os
 import subprocess
 import sys
 
+# auto_sync.py runs as a DETACHED process (spawned via --spawn, no console of its own), so every
+# git subprocess it starts would otherwise pop its own new visible console window on Windows.
+# Found live (2026-09-17): a user watched "a bunch of black windows" flash for one question --
+# this file fires far more often (every gated session end / long task), so it is the biggest
+# single contributor. No-op on non-Windows.
+QUIET_SUBPROCESS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
 ALLOWED_PREFIXES = ("notes/", "openspec/", "project_files/python/", "monitor/", ".cursor/", ".claude/")
 ALLOWED_FILES = ("CLAUDE.md", "ZASADY_PRACY.md", ".gitignore")
 BLOCKED_PREFIXES = ("project_files/run_files/", "notes/user_tasks/")
@@ -226,7 +233,7 @@ def decide(entries: list, last_commit_paths: list, today: str, allow=None, files
 
 def git(args, cwd, check=False, raw=False):
     r = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                       errors="replace")
+                       errors="replace", **QUIET_SUBPROCESS)
     if check and r.returncode != 0:
         raise RuntimeError("git %s failed (%d): %s" % (" ".join(args), r.returncode, r.stderr.strip()))
     return r.stdout if raw else r.stdout.strip()
@@ -253,7 +260,7 @@ def heartbeat_label(root, text):
     if os.path.exists(hb):
         try:
             subprocess.run([sys.executable, hb, "--event", "label", "--label", text[:80]], cwd=root,
-                           timeout=10, capture_output=True)
+                           timeout=10, capture_output=True, **QUIET_SUBPROCESS)
         except Exception:
             pass
 
@@ -331,7 +338,7 @@ def run(root, dry_run=False):
             cmd = resolve_python(root, cfg["tests"])
             report.append("G4 interpreter: %s" % os.path.basename(cmd[0]))
             t = subprocess.run(cmd, cwd=root, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=900)
+                               errors="replace", timeout=900, **QUIET_SUBPROCESS)
             tail = (t.stdout.strip().splitlines() or [""])[-1]
             report.append("G4 pytest rc=%d: %s" % (t.returncode, tail))
             if t.returncode != 0:
@@ -367,7 +374,7 @@ def rebase_outcome(rc, conflicts):
 def git_rc(args, cwd):
     """(returncode, stdout) -- git() swallows the code, and here the code is the decision."""
     r = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", **QUIET_SUBPROCESS)
     return r.returncode, r.stdout
 
 
