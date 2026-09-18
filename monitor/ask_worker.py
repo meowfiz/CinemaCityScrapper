@@ -47,6 +47,7 @@ import ask_core  # noqa: E402
 import capabilities  # noqa: E402
 import heartbeat  # noqa: E402
 import live_sessions  # noqa: E402
+import repo_locations  # noqa: E402
 
 POLL_S = 30.0
 ANSWER_TIMEOUT_S = 180.0
@@ -241,6 +242,23 @@ def send_beat(cfg, repo_map, caps=None, running=0):
         return False
 
 
+def send_repo_locations(cfg, repo_map, collector=None):
+    """Report which repositories this machine has and where (change machine-repo-registry).
+
+    Separate from the heartbeat for the same reason as send_windows: it shells out to git once
+    per repository, and a slow disk must not delay the worker being registered as alive. Never
+    raises -- a machine that cannot describe its clones is still a machine that answers questions.
+    """
+    try:
+        rows = (collector or repo_locations.collect)(repo_map)
+        api(cfg, "POST", "/api/repos/locations",
+            {"machine": machine_name(cfg), "repos": rows}, timeout=BEAT_TIMEOUT_S)
+        return len(rows)
+    except Exception as e:  # noqa: BLE001
+        heartbeat.log("ask worker repo locations failed: %r" % (e,))
+        return 0
+
+
 def send_windows(cfg, lister=None):
     """Report which Claude Code windows are open here (stream C), alongside the heartbeat.
 
@@ -367,6 +385,7 @@ def serve(cfg, once=False, sleep=time.sleep, runner=None):
             caps = capabilities.detect([p for p in repo_map.values() if p])
         send_beat(cfg, repo_map, caps)  # same loop as the claim: no second thread, no second timer
         send_windows(cfg)               # which Claude Code windows are open here (stream C)
+        send_repo_locations(cfg, repo_map)  # which repos this machine has, and where
         try:
             items = claim(cfg)
         except Exception as e:
