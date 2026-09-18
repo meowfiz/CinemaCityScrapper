@@ -45,6 +45,14 @@ try:
 except ImportError:  # pragma: no cover - the pack always ships both
     ask_worker = None
 
+# One source of truth for "this never goes into a commit" (rule 2.5), shared with the automatic
+# end-of-session sync. Restating the lists here would let them drift apart silently.
+try:
+    from auto_sync import BLOCKED_PREFIXES, BLOCKED_SUFFIXES  # noqa: E402
+except ImportError:  # pragma: no cover - the pack always ships auto_sync.py
+    BLOCKED_PREFIXES = ("project_files/run_files/", "notes/user_tasks/")
+    BLOCKED_SUFFIXES = (".log", ".tmp", ".pyc", ".pyo")
+
 WORKER_KIND = "execute"
 WORKER_VERSION = "1.0"
 POLL_S = 30.0
@@ -135,6 +143,26 @@ def refuse_reason(flags, status_porcelain, item):
     if not (item.get("text") or "").strip():
         return "empty task text"
     return None
+
+
+def artifacts(name_status):
+    """Staged paths that rule 2.5 says never belong in a commit: logs and run artefacts.
+
+    Found on the very first real execute run (2026-09-18, item 27): the agent's work left
+    `project_files/run_files/auto_sync.log` in the tree and `git add -A` swept it into the
+    commit. auto_sync.py has refused these paths since it was written; this worker commits too,
+    so it needs the same rule -- and it imports the lists rather than restating them, because two
+    copies of an allowlist drift and the drift is invisible until something wrong is published.
+    """
+    out = []
+    for line in (name_status or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        path = parts[-1].strip().strip('"').replace("\\", "/")
+        if path.startswith(BLOCKED_PREFIXES) or path.endswith(BLOCKED_SUFFIXES):
+            out.append(path)
+    return out
 
 
 def deletions(name_status):
@@ -229,6 +257,15 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
         git(["add", "-A"], repo_path, runner=git_runner)
         git(["reset", "-q", "--", FLAGS_FILE], repo_path, runner=git_runner)  # never commit the switch
         staged = git_out(["diff", "--cached", "--name-status"], repo_path, git_runner)
+        junk = artifacts(staged)
+        if junk:
+            # Unstaged, not refused: a log the agent happened to touch is not a reason to throw
+            # away good work -- it is a reason not to publish the log (rule 2.5).
+            git(["reset", "-q", "--"] + junk, repo_path, runner=git_runner)
+            staged = git_out(["diff", "--cached", "--name-status"], repo_path, git_runner)
+            if not staged.strip():
+                return {"result": (answer or "Tylko artefakty, nic do zacommitowania.")[:20000],
+                        "branch": branch}
         gone = deletions(staged)
         if gone:
             git(["reset"], repo_path, runner=git_runner)
