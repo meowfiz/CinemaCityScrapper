@@ -166,6 +166,58 @@ def artifacts(name_status):
     return out
 
 
+def allowed_paths(flags):
+    """Path prefixes this repository allows an unattended agent to change.
+
+    Empty list (the default) means "no restriction beyond the other gates" -- adding a scope is a
+    decision the repository makes, not one forced on every repository the day this shipped.
+    """
+    raw = flags.get("paths")
+    if not isinstance(raw, list):
+        return []
+    return [str(p).strip().replace("\\", "/").lstrip("./") for p in raw if str(p).strip()]
+
+
+def outside_scope(name_status, allowed):
+    """Staged paths that fall outside what the repository allows (change agent-experience D.1).
+
+    Until now `execute: true` was a single boolean: the agent could touch anything in the
+    repository. That is fine for a sandbox and too much for a project with real work in it -- the
+    switch people hesitate over is not "may it write" but "may it write THERE".
+    """
+    if not allowed:
+        return []
+    out = []
+    for line in (name_status or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        path = parts[-1].strip().strip('"').replace("\\", "/")
+        if not any(path == p or path.startswith(p.rstrip("/") + "/") for p in allowed):
+            out.append(path)
+    return out
+
+
+def too_big(name_status, flags):
+    """A change larger than the repository is willing to accept unattended, or None.
+
+    A limit on FILES, not on lines: it is the number a person can hold in their head when
+    deciding whether to read a diff, and it does not punish a legitimately long generated file.
+    """
+    limit = flags.get("max_files")
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return None
+    if limit <= 0:
+        return None
+    changed = [ln for ln in (name_status or "").splitlines() if ln.strip()]
+    if len(changed) <= limit:
+        return None
+    return ("zmiana obejmuje %d plikow, a to repozytorium pozwala bez nadzoru na %d"
+            % (len(changed), limit))
+
+
 def deletions(name_status):
     """Lines of `git diff --name-status` that delete a file. Rule 2.7: a commit made by a machine
     never removes anything."""
@@ -281,6 +333,20 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
             if not staged.strip():
                 return {"result": (answer or "Tylko artefakty, nic do zacommitowania.")[:20000],
                         "branch": branch}
+
+        # change agent-experience D.1: WHERE an unattended agent may write, and how much of it.
+        # Checked after the artefact unstaging, so a log outside the scope is dropped rather than
+        # counted as a violation.
+        stray = outside_scope(staged, allowed_paths(flags))
+        if stray:
+            git(["reset"], repo_path, runner=git_runner)
+            return outcome_error(
+                "zmiany poza dozwolonym zakresem (%s): %s"
+                % (", ".join(allowed_paths(flags)), ", ".join(stray[:5])))
+        oversized = too_big(staged, flags)
+        if oversized:
+            git(["reset"], repo_path, runner=git_runner)
+            return outcome_error(oversized)
         gone = deletions(staged)
         if gone:
             git(["reset"], repo_path, runner=git_runner)
