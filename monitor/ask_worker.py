@@ -54,6 +54,10 @@ ANSWER_TIMEOUT_S = 180.0
 # change project-orchestrator, phase A: the server counts three missed beats as death,
 # so the beat must not be able to hold the loop for longer than one poll.
 BEAT_TIMEOUT_S = 10.0
+# change agent-experience B: how long one claim may hold the connection open. Kept under
+# the worker TTL (90 s) with room to spare, so a waiting worker still beats often enough
+# to look alive -- a worker that goes quiet while waiting would be reported OFFLINE.
+CLAIM_WAIT_S = 25.0
 WORKER_VERSION = "1.1"
 READ_ONLY_TOOLS = "Read,Grep,Glob"
 REPOS_FILE = os.path.join(os.path.expanduser("~"), ".claude", "monitor_repos.env")
@@ -206,9 +210,19 @@ def api(cfg, method, path, body=None, timeout=20.0):
     return json.loads(raw) if raw.strip() else {}
 
 
-def claim(cfg, limit=1):
-    return api(cfg, "POST", "/api/inbox/claim?machine=%s&limit=%d" % (
-        urllib.parse.quote(machine_name(cfg)), limit)).get("items", [])
+def claim(cfg, limit=1, wait_s=0.0):
+    """Ask for work, optionally holding the request open until some arrives.
+
+    change agent-experience B: polling every 30 s meant up to half a minute of a question's
+    life passed with everything idle and the answer simply not started. The long poll needs no
+    new protocol and survives any proxy; a broken connection just falls back to asking again,
+    so the old behaviour is the failure mode rather than the design.
+    """
+    path = "/api/inbox/claim?machine=%s&limit=%d" % (urllib.parse.quote(machine_name(cfg)), limit)
+    if wait_s > 0:
+        path += "&wait=%.0f" % wait_s
+    # the socket must outlive the server-side wait, or every long poll ends as a timeout
+    return api(cfg, "POST", path, timeout=wait_s + 15.0 if wait_s else 20.0).get("items", [])
 
 
 def beat_payload(cfg, repo_map, caps=None, running=0):
@@ -321,7 +335,7 @@ ALL_REPOS = "*"  # the phone asks across every repo this machine has, not one na
 
 
 def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_paths=(),
-            refresh=True, use_digest=True):
+            refresh=True, use_digest=True, thread_id=None, first_turn=True, stats=None):
     """(answer, error) for one queued question. A thin client of ask_core (change ask-core): the
     call itself, the freshness pull and the sentence limit live there, shared with the car bridge.
 
@@ -336,7 +350,8 @@ def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_
     paths = [repo_path] + [p for p in extra_paths if p and p != repo_path]
     context = ask_core.refresh_all(paths) if refresh else None
     return ask_core.ask(paths, question, system=system_prompt(), timeout=timeout_s,
-                        runner=runner, context=context, use_digest=use_digest)
+                        runner=runner, context=context, use_digest=use_digest,
+                        thread_id=thread_id, first_turn=first_turn, stats=stats)
 
 
 def resolve_paths(repo, repo_map):
@@ -361,10 +376,21 @@ def handle(cfg, item, repo_map, runner=None):
             {"error": ("brak repozytoriow na tej maszynie (~/.claude/monitor_repos.env)" if repo == ALL_REPOS
                        else "repo %s is not on this machine (see ~/.claude/monitor_repos.env)" % repo)})
         return "unknown-repo"
+    # change agent-experience A: continue THIS conversation's Claude session, so a follow-up
+    # ("rozwin to") is answered by something that remembers the previous turn. The server owns
+    # the decision to start or resume -- only it knows whether this pair has spoken before.
+    stats = {}
     answer, error = run_ask(path, item.get("text") or "", _float(cfg, "MONITOR_ASK_TIMEOUT_S",
-                                                                ANSWER_TIMEOUT_S), runner, extra)
-    api(cfg, "POST", "/api/inbox/%d/answer" % item["id"],
-        {"answer": answer} if answer else {"error": error or "no answer"})
+                                                                ANSWER_TIMEOUT_S), runner, extra,
+                            thread_id=item.get("thread_id"),
+                            first_turn=bool(item.get("thread_new", 1)), stats=stats)
+    # change agent-experience D.4: what this one answer actually cost, so "jak najtaniej" is a
+    # measurement rather than a belief.
+    body = {"answer": answer} if answer else {"error": error or "no answer"}
+    if stats.get("cost_usd") is not None:
+        body["cost_usd"] = stats["cost_usd"]
+        body["tokens"] = int(stats.get("tokens_in") or 0) + int(stats.get("tokens_out") or 0)
+    api(cfg, "POST", "/api/inbox/%d/answer" % item["id"], body)
     return "answered" if answer else "failed"
 
 
@@ -387,7 +413,9 @@ def serve(cfg, once=False, sleep=time.sleep, runner=None):
         send_windows(cfg)               # which Claude Code windows are open here (stream C)
         send_repo_locations(cfg, repo_map)  # which repos this machine has, and where
         try:
-            items = claim(cfg)
+            # Hold the request open instead of sleeping between polls: the beat interval is still
+            # the upper bound on how long we stay quiet, so the server keeps seeing us alive.
+            items = claim(cfg, wait_s=0.0 if once else CLAIM_WAIT_S)
         except Exception as e:
             heartbeat.log("ask worker claim failed: %r" % (e,))
             items = []
@@ -400,7 +428,10 @@ def serve(cfg, once=False, sleep=time.sleep, runner=None):
                 heartbeat.log("ask worker item failed: %r" % (e,))
         if once:
             return handled
-        sleep(poll_s if not items else 1.0)  # drain a burst quickly, then go back to sleep
+        # change agent-experience B: the waiting now happens INSIDE the claim, held open by the
+        # server, so sleeping here again would put the 30 s back. A short pause remains so that a
+        # server which answers instantly (or an error) cannot spin this loop.
+        sleep(1.0 if items else 2.0)
 
 
 def main(argv=None):
