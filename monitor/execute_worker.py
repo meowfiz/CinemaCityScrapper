@@ -208,7 +208,19 @@ def current_branch(cwd, runner=None):
 
 # -- the run ---------------------------------------------------------------------------------
 
-def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=AGENT_TIMEOUT_S):
+def say(on_progress, pct, note):
+    """Report a stage if somebody is listening. The stages are coarse on purpose: 15/65/85 are
+    real boundaries in this function (branch made, tests starting, committing), and a made-up
+    smooth percentage would be a worse lie than three honest ones."""
+    if on_progress:
+        try:
+            on_progress(pct, note)
+        except Exception:  # noqa: BLE001 - progress must never fail the work
+            pass
+
+
+def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=AGENT_TIMEOUT_S,
+             on_progress=None):
     """Do one work item. Returns the body to POST to /api/tasks/{id}/result.
 
     Never raises: a failure is a reported failure, because an unreported one leaves the item
@@ -233,6 +245,7 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
             return outcome_error("cannot create branch %s: %s" % (branch, (made.stderr or "")[:300]))
         created = True
 
+        say(on_progress, 15, "galaz utworzona, pracuje nad zmianami")
         answer, error = _run_agent(repo_path, item, agent, timeout)
         if error:
             return outcome_error(error)
@@ -251,6 +264,7 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
         if not changed:
             return {"result": (answer or "Brak zmian w plikach.")[:20000], "branch": branch}
 
+        say(on_progress, 65, "zmiany gotowe, uruchamiam testy")
         tests = _run_tests(repo_path, flags, git_runner)
         if tests is not None:
             return outcome_error(tests)
@@ -273,6 +287,7 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
             return outcome_error("refusing a commit that deletes %d file(s): %s"
                                  % (len(gone), ", ".join(gone[:5])))
 
+        say(on_progress, 85, "testy przeszly, commituje")
         done = git(["-c", "user.email=orchestrator@local", "-c", "user.name=orchestrator",
                     "commit", "-q", "-m", commit_message(item_id, item.get("text"))],
                    repo_path, runner=git_runner)
@@ -400,13 +415,25 @@ def report(cfg, item_id, body):
     return ask_worker.api(cfg, "POST", "/api/tasks/%s/result" % item_id, body)
 
 
+def progress(cfg, item_id, pct, note):
+    """Tell the server how far this item is (change remote-tasks 7.4b). Best effort: a worker
+    that cannot report progress must still finish the job, so this never raises and never
+    retries -- the next stage will say where we got to anyway."""
+    try:
+        ask_worker.api(cfg, "POST", "/api/tasks/%s/progress" % item_id,
+                       {"pct": pct, "note": note}, timeout=BEAT_TIMEOUT_S)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def handle(cfg, item, repo_map, agent=None):
     repo = item.get("repo")
     path = (repo_map or {}).get(repo)
     if not path or not os.path.isdir(path):
         report(cfg, item.get("id"), outcome_error("repo %s is not on this machine" % repo))
         return "unknown-repo"
-    body = run_item(path, item, agent=agent)
+    body = run_item(path, item, agent=agent,
+                    on_progress=lambda pct, note: progress(cfg, item.get("id"), pct, note))
     report(cfg, item.get("id"), body)
     return "failed" if body.get("error") else "done"
 
