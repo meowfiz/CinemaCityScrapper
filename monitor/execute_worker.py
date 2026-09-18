@@ -33,6 +33,7 @@ import os
 import platform
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -410,11 +411,42 @@ def handle(cfg, item, repo_map, agent=None):
     return "failed" if body.get("error") else "done"
 
 
+def lock_path():
+    """Its own lock, next to the ask worker's -- the two are different jobs and must not exclude
+    each other, but two of THESE on one machine is an accident waiting to happen."""
+    return os.path.join(tempfile.gettempdir(), "monitor_execute_worker.lock")
+
+
+def another_is_running(now=None):
+    """Is a second execute worker already serving on this machine?
+
+    The ask worker has had this since it was written; this one was started by hand and never got
+    it. It matters more here, not less: two ask workers would at worst answer two questions, but
+    two execute workers check out branches in the SAME working tree, and the second one's
+    `git checkout` lands in the middle of the first one's edits. That is precisely the accident
+    rule 2.7 exists for, and no gate downstream can see it coming.
+    """
+    return ask_worker.lock_is_live(lock_path(), time.time() if now is None else now, POLL_S)
+
+
+def touch_lock(now):
+    try:
+        with open(lock_path(), "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(), "at": now, "machine": platform.node()}, f)
+    except OSError:
+        pass
+
+
 def serve(cfg, once=False, sleep=time.sleep, agent=None):
     caps = None
+    if not once and another_is_running():
+        heartbeat.log("execute worker: another one is already serving here, exiting")
+        return 0
     heartbeat.log("execute worker started pid=%d" % os.getpid())
     handled = 0
     while True:
+        if not once:
+            touch_lock(time.time())  # a stale lock is how the next start knows we died
         repo_map = ask_worker.load_repo_map()
         if caps is None:
             caps = capabilities.detect([p for p in repo_map.values() if p])
