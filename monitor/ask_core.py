@@ -25,6 +25,7 @@ Standard library only. ASCII only. No function here raises for an expected failu
 is (None, "reason"), because both callers must keep running.
 """
 
+import json
 import os
 import re
 import shutil
@@ -282,12 +283,61 @@ def for_speech(text, limit=SPEECH_MAX):
 
 # -- the call ------------------------------------------------------------------------------------
 
-def build_command(exe, paths, system, model=None, allow=None, deny=None):
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def parse_output(stdout):
+    """(text, stats) from a `claude -p` run.
+
+    With --output-format json the CLI reports what the run actually cost, which is the only way
+    "jak najtaniej" can be a measurement rather than a belief. Falls back to treating the output
+    as plain text: this is the most critical path in the system, and a CLI that changes its mind
+    about JSON must cost an answer nothing.
+    """
+    raw = (stdout or "").strip()
+    if not raw.startswith("{"):
+        return raw, {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return raw, {}
+    if not isinstance(data, dict) or "result" not in data:
+        return raw, {}
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    stats = {
+        "cost_usd": data.get("total_cost_usd"),
+        "tokens_in": (usage.get("input_tokens") or 0) + (usage.get("cache_read_input_tokens") or 0)
+                     + (usage.get("cache_creation_input_tokens") or 0),
+        "tokens_out": usage.get("output_tokens") or 0,
+        "duration_ms": data.get("duration_ms"),
+        "turns": data.get("num_turns"),
+    }
+    return str(data.get("result") or "").strip(), stats
+
+
+def thread_args(thread_id, first_turn):
+    """How to keep ONE conversation across separate headless runs (change agent-experience, A).
+
+    Measured 2026-09-18: `claude -p --session-id <uuid>` followed by `claude -p --resume <uuid>`
+    carries the context between two independent invocations -- the second run answered a question
+    that only the first one could have known. That is the whole mechanism behind "rozwin to".
+
+    The id must be a real UUID (the CLI refuses anything else), so a malformed one yields no
+    arguments at all rather than a failed run: a thread is an improvement, never a precondition.
+    """
+    if not thread_id or not _UUID_RE.match(str(thread_id).strip()):
+        return []
+    return ["--session-id" if first_turn else "--resume", str(thread_id).strip()]
+
+
+def build_command(exe, paths, system, model=None, allow=None, deny=None,
+                  thread_id=None, first_turn=True):
     """argv for `claude -p`. NO element may contain a newline: on Windows `claude` is claude.CMD and
     cmd.exe truncates an argument at the first one. The question never travels here -- it goes on
     stdin -- which is exactly the defect of 2026-09-16 that this function exists to make impossible."""
-    cmd = [exe, "-p", "--output-format", "text",
+    cmd = [exe, "-p", "--output-format", "json",
            "--append-system-prompt", " ".join((system or DEFAULT_SYSTEM).split())]
+    cmd += thread_args(thread_id, first_turn)
     if model:
         cmd += ["--model", model]
     cmd += ["--allowedTools"] + list(allow or ALLOW_TOOLS)
@@ -299,7 +349,8 @@ def build_command(exe, paths, system, model=None, allow=None, deny=None):
 
 
 def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, runner=None,
-        context=None, allow=None, deny=None, env=None, use_digest=False):
+        context=None, allow=None, deny=None, env=None, use_digest=False,
+        thread_id=None, first_turn=True, stats=None):
     """(answer, error). Never raises: a failed answer is a reported error, not a dead caller.
 
     paths[0] is the working directory, the rest are handed over with --add-dir, so one question can
@@ -316,7 +367,7 @@ def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, run
     stdin_text = ((digest_block(paths) if use_digest else "")
                   + (context_block(context) if context else "")
                   + (question or ""))
-    cmd = build_command(exe, paths, system, model, allow, deny)
+    cmd = build_command(exe, paths, system, model, allow, deny, thread_id, first_turn)
     run = runner or subprocess.run
     # the headless run fires the repo's hooks too; heartbeat.py must not count it as an open window
     run_env = dict(env or os.environ, MONITOR_HEADLESS="1")
@@ -329,8 +380,24 @@ def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, run
     except Exception as exc:
         return None, "runner failed: %r" % (exc,)
     if out.returncode != 0:
-        return None, ("claude exited %d: %s" % (out.returncode, (out.stderr or "").strip()))[:1000]
-    text = (out.stdout or "").strip()
+        if thread_args(thread_id, first_turn):
+            # A thread is an improvement, never a precondition: a session file that was cleaned
+            # up, a colliding id, a CLI that changed its mind about --resume -- none of that is
+            # the user's problem, and none of it may turn a question into an error. Retry once
+            # WITHOUT the thread. The answer loses its memory of the previous turn and says
+            # nothing about it, which is far better than a failure the caller cannot act on.
+            plain = build_command(exe, paths, system, model, allow, deny)
+            try:
+                out = run(plain, input=stdin_text, cwd=paths[0], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout, env=run_env,
+                          **QUIET_SUBPROCESS)
+            except (subprocess.TimeoutExpired, Exception) as exc:  # noqa: B014
+                return None, "runner failed after thread retry: %r" % (exc,)
+        if out.returncode != 0:
+            return None, ("claude exited %d: %s" % (out.returncode, (out.stderr or "").strip()))[:1000]
+    text, run_stats = parse_output(out.stdout)
+    if stats is not None and run_stats:
+        stats.update(run_stats)
     if not text:
         return None, "empty answer"
     limit = sentence_limit(question)
