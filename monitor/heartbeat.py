@@ -47,7 +47,8 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import taskparse  # noqa: E402
 
-EVENTS = ("session_start", "prompt", "tool", "stop", "stop_failure", "waiting", "session_end", "label")
+EVENTS = ("session_start", "prompt", "tool", "stop", "stop_failure", "waiting", "session_end",
+          "label", "progress")
 NET_TIMEOUT_S = 2.0
 TOOL_THROTTLE_S = 30.0
 PROMPT_EXCERPT_LEN = 120
@@ -515,7 +516,10 @@ def build_event(event, hook, cfg, label=None, agents=None):
     ev = {
         "repo": repo_name(cwd),
         "machine": cfg.get("MONITOR_MACHINE") or platform.node(),
-        "session_id": hook.get("session_id") or ("label" if event == "label" else "unknown"),
+        # A label or a progress report is sent by a script, not from a hook, so there is no
+        # session on stdin. Naming them rather than calling them "unknown" keeps them out of the
+        # window count, which is what "unknown" would silently join.
+        "session_id": hook.get("session_id") or (event if event in ("label", "progress") else "unknown"),
         "event": wire_event,
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "ahead": commits_ahead(cwd),
@@ -577,6 +581,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--event", required=True, choices=EVENTS)
     parser.add_argument("--label", default=None)
+    # change remote-tasks 7.4: progress INSIDE one task. Until now the only progress the panel
+    # had was done/total from OpenSpec, so a long task looked the same at minute 1 and 40.
+    parser.add_argument("--pct", type=int, default=None)
+    parser.add_argument("--note", default=None)
     args, _ = parser.parse_known_args(argv)
 
     cfg = load_config()
@@ -584,13 +592,15 @@ def main(argv=None):
     token = cfg.get("MONITOR_TOKEN")
     if args.event == "label" and not (args.label or "").strip():
         return 0
+    if args.event == "progress" and args.pct is None:
+        return 0  # a progress report without a number says nothing
     # A headless `claude -p` started by ask_worker.py runs the same hooks in the same repo and would
     # show up as one more window on the machines view (seen 2026-09-16). It reports through the
     # inbox already, so it is not a session worth tracking here.
     if os.environ.get("MONITOR_HEADLESS") == "1":
         return 0
 
-    hook = {} if args.event == "label" else read_stdin_json()
+    hook = {} if args.event in ("label", "progress") else read_stdin_json()
 
     # Rule 2.9: a task longer than MONITOR_AUTOSYNC_MIN_S ends with a gated commit + push. Done
     # before the monitor check on purpose -- this is about git, not about the dashboard.
@@ -614,7 +624,9 @@ def main(argv=None):
     if agents_changed is False and throttled(args.event, hook.get("session_id")):
         return 0
 
-    payload = build_event(args.event, hook, cfg, label=args.label, agents=agents)
+    payload = build_event(args.event, hook, cfg, label=args.label or args.note, agents=agents)
+    if args.event == "progress":
+        payload["pct"] = max(0, min(100, int(args.pct)))
     try:
         status = post(url, token, payload)
         if status >= 300:
