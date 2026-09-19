@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.7 (2026-09-16). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.8 (2026-09-19). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -321,6 +321,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `openspec/changes/*/tasks.md` | zadania `- [ ]` / `- [x]`, wpisy PREREJESTRACJA | meta-projekt (otwarte zadania) |
 | `openspec/STATUS.md` | **generowany** `notes/gen_openspec_status.py` | meta-projekt (postęp %) |
 | `.claude/settings.json` | hooki Claude Code (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`) wywołujące heartbeat; **scalane sumą** z ustawieniami projektu | Claude Code |
+| `monitor/services.py` | jeden punkt wejścia do usług tła tej maszyny (`--start` podnosi brakujące, tabela mówi, co działa): worker pytań, worker zleceń, bramka głosowa. Wywoływany przez hook `SessionStart` i przez wpis w Autostarcie (`tools/install_autostart.py`). Stan jest **pomiarem** — świeżość zamka, otwarty port — nie deklaracją | człowiek („czy mogę pracować zdalnie"), Claude Code |
 | `monitor/heartbeat.py`, `monitor/taskparse.py` | heartbeat do serwera monitora (tylko stdlib, ASCII; adres i token w `~/.claude/monitor.env`, nigdy w repo); `--event label --label "..."` nadaje nazwę bieżącemu zadaniu (reguła 1.5); parser `tasks.md` wspólny z `gen_openspec_status.py`; zegar zadania (prompt → stop) odpala `auto_sync.py` po 10 min (reguła 2.9) | meta-projekt (stan „pracuje / czeka / skończył" na żywo, czas i nazwa zadania) |
 | `project_files/python/` (lub `src/`) | kod analityczny | — |
 | `project_files/python/tests/` | testy nazywające porażki | CI / meta-projekt (`pytest -q`) |
@@ -346,6 +347,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.8 | 2026-09-19 | Sekcja 9 zyskuje `monitor/services.py`: **jeden punkt wejścia** podnoszący usługi tła maszyny (worker pytań, worker zleceń, bramka głosowa), wołany z hooka `SessionStart` i z Autostartu. *Skąd:* trzy procesy startowały trzema różnymi drogami (wpis logowania, ręcznie, otwarty terminal), a komentarz w `ask_worker.py` od miesiąca twierdził, że robi to hook `SessionStart` — czego żaden `settings.json` nie zawierał. Zmierzone 2026-09-19: worker zleceń nie działał od ~16 h (zamek nieodświeżany), więc zlecenie z telefonu czekałoby w kolejce bez śladu. Stan usługi jest **pomiarem** (świeżość zamka, otwarty port), bo zamek po martwym procesie to nie dowód. |
 | 1.7 | 2026-09-16 | Reguła 2.8: po lokalnym commicie automat **rebase'uje na upstream i pushuje** (czysty rebase, ponowne G3 i G4, konflikt → `abort` i commit lokalny, nigdy `--force`; wyłącznik `{"rebase": false}`). Bramka G2 zatrzymuje commit, gdy nowy plik źródłowy zostaje poza nim w katalogu, do którego commitujemy źródła. *Skąd:* decyzja użytkownika „nie ma sensu trzymać commitów niewypchniętych”; oraz znalezisko sesji Car — auto-sync wypchnął zmodyfikowany `poc/ask_server.py` bez nowych `poc/intent.py` i `poc/aliases.json`, czyli drzewo z `ImportError`, które pecet w pracy pobrałby `git pull` co godzinę, a watchdog restartowałby w milczeniu. |
 | 1.6 | 2026-09-15 | Reguła 2.9 „zadanie dłuższe niż 10 minut kończy się commitem i pushem — automatycznie" (zegar zadania w `heartbeat.py`, próg `MONITOR_AUTOSYNC_MIN_S` = 600 s, te same bramki G1–G5 co 2.8); 2.1 dostaje odsyłacz „poza 2.8 i 2.9". *Skąd:* decyzja użytkownika — im dłuższe zadanie, tym większa szansa, że nie ma go przy komputerze, a wynik jest potrzebny na repo z drugiej maszyny lub z innego projektu. |
 | 1.5 | 2026-09-15 | Reguły 4.10 „tekst z zewnątrz czytamy jako bajty i dekodujemy UTF-8 jawnie" i 4.11 „nieodwracalna naprawa danych ma warunek akceptacji". *Skąd:* `monitor/heartbeat.py` czytał ładunek hooka przez `sys.stdin.read()`, a `sys.stdin.encoding` na polskim Windowsie to cp1250 — każda polska litera szła na telefon i do HA jako mojibake (28 pól w 7 repo). Naprawa źródła + odwrócenie uszkodzenia w historii (`server/mojibake.py`, run po runie, z listą dopuszczalnych zakresów Unicode). |
