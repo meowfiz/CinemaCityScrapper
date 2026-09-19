@@ -64,10 +64,15 @@ REPOS_FILE = os.path.join(os.path.expanduser("~"), ".claude", "monitor_repos.env
 ANSWER_MAX = 4000
 
 
-# -- one worker per machine, started by whichever Claude Code window comes first -------------------
-# The SessionStart hook calls `ask_worker.py --spawn`. The first call on a machine starts the loop
-# detached; every later call finds a live lock and returns at once. A worker that dies stops
-# touching the lock, so after LOCK_STALE_POLLS polls the next window starts a fresh one.
+# -- one worker per machine ------------------------------------------------------------------
+# Started by monitor/services.py --start, which the SessionStart hook calls and the logon .cmd
+# calls (tools/install_autostart.py). The first call on a machine starts the loop detached; every
+# later call finds a live lock and returns at once. A worker that dies stops touching the lock, so
+# after LOCK_STALE_POLLS polls the next start brings up a fresh one.
+#
+# The line above used to say the SessionStart hook calls this file directly. It did not: no
+# settings.json ever had that, and the only thing that actually started the worker was the logon
+# .cmd -- so on a machine that had not been rebooted, nothing answered the phone.
 
 LOCK_STALE_POLLS = 3
 
