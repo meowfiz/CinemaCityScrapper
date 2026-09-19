@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ask_core  # noqa: E402
 import capabilities  # noqa: E402
 import heartbeat  # noqa: E402
+import sessions  # noqa: E402
 
 try:
     import ask_worker  # noqa: E402  - shares the config loader, the api() helper and the repo map
@@ -467,7 +468,7 @@ def _enabled_repos(repo_map):
 
 
 def claim(cfg, limit=1):
-    path = "/api/tasks/claim?worker_id=%s&kind=execute&limit=%d" % (
+    path = "/api/tasks/claim?worker_id=%s&kind=execute&kind=session&kind=session_stop&limit=%d" % (
         _quote(worker_id(cfg)), limit)
     return ask_worker.api(cfg, "POST", path).get("items", [])
 
@@ -492,12 +493,44 @@ def progress(cfg, item_id, pct, note):
         pass
 
 
+def run_session(repo_path, item, flags=None, starter=None):
+    """Start a project working on its own. Returns the body to report.
+
+    The same switch as every other write: a background session has Write and Edit, so a repository
+    that has not opted into execution does not get one either.
+    """
+    flags = load_flags(repo_path) if flags is None else flags
+    if not execute_enabled(flags):
+        return outcome_error("execute is off in this repository (.claude/orchestrator.json)")
+    short, error = (starter or sessions.start)(repo_path, item.get("text") or "")
+    if error:
+        return outcome_error(error)
+    return {"result": "Projekt pracuje, numer sesji %s." % short, "session_bg_id": short}
+
+
+def run_session_stop(item, stopper=None):
+    """Stop one. The id travels in the item text, because that is what the caller heard."""
+    ok, message = (stopper or sessions.stop)((item.get("text") or "").strip())
+    if not ok:
+        return outcome_error(message)
+    return {"result": message}
+
+
 def handle(cfg, item, repo_map, agent=None):
     repo = item.get("repo")
+    kind = item.get("kind")
+    if kind == "session_stop":
+        # No repository needed: a session id is enough, and the session may already be gone.
+        report(cfg, item.get("id"), run_session_stop(item))
+        return "done"
     path = (repo_map or {}).get(repo)
     if not path or not os.path.isdir(path):
         report(cfg, item.get("id"), outcome_error("repo %s is not on this machine" % repo))
         return "unknown-repo"
+    if kind == "session":
+        body = run_session(path, item)
+        report(cfg, item.get("id"), body)
+        return "failed" if body.get("error") else "done"
     body = run_item(path, item, agent=agent,
                     on_progress=lambda pct, note: progress(cfg, item.get("id"), pct, note))
     report(cfg, item.get("id"), body)
@@ -528,6 +561,34 @@ def touch_lock(now):
             json.dump({"pid": os.getpid(), "at": now, "machine": platform.node()}, f)
     except OSError:
         pass
+
+
+def spawn_detached():
+    """Start this worker in the background, no console window (same shape as the ask worker's)."""
+    args = [sys.executable, os.path.abspath(__file__), "--serve"]
+    kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+          "close_fds": True, "cwd": os.path.expanduser("~")}
+    if os.name == "nt":
+        kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    else:
+        kw["start_new_session"] = True
+    subprocess.Popen(args, **kw)
+
+
+def ensure_running(cfg, now=None):
+    """Start the worker unless one is alive. Returns 'running' | 'spawned' | 'no-config'.
+
+    The ask worker has had this since it was written and this one did not, which is why it was
+    started by hand and was therefore usually not running at all: a work item sent from the phone
+    sat in the queue until someone noticed. Same contract, same idempotence -- a second call while
+    one serves is a no-op.
+    """
+    if not cfg.get("MONITOR_URL") or not cfg.get("MONITOR_TOKEN"):
+        return "no-config"
+    if another_is_running(now):
+        return "running"
+    spawn_detached()
+    return "spawned"
 
 
 def serve(cfg, once=False, sleep=time.sleep, agent=None):
@@ -580,11 +641,15 @@ def main(argv=None):
     ap.add_argument("--serve", action="store_true")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--spawn", action="store_true", help="start detached unless one is running")
     args, _rest = ap.parse_known_args(argv)
     try:
         cfg = heartbeat.load_config()
     except Exception:  # noqa: BLE001
         cfg = {}
+    if args.spawn:
+        print(ensure_running(cfg))
+        return 0
     if args.status or not (args.serve or args.once):
         print(status_text(cfg))
         return 0
