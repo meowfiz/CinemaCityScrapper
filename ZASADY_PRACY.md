@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.8 (2026-09-19). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.9 (2026-09-19). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -296,6 +296,12 @@ i zweryfikowane — powiedz bez asekuracji.
 **7.4 Gdy użytkownik mówi „mieszasz"** — to zwykle prawda; zapisz w notatce, co konkretnie
 i jaka reguła z tego wynika (sekcja 4.2 i 4.3 stąd powstały).
 
+**7.5 Lakonicznie. Odpowiedź jest krótka, chyba że użytkownik poprosi o długą.** Wynik i to, co
+z niego wynika — bez tabel podsumowujących, bez powtarzania tego, co już powiedziane, bez
+opisywania drogi, którą się doszło. Liczby i nazwy plików zostają; narracja nie. *Dlaczego:*
+użytkownik prosił o to trzeci raz (2026-09-18, 2026-09-19: „bądź w końcu lakoniczny"), a ściana
+tekstu ukrywa jedno zdanie, po które sięgnął.
+
 ---
 
 ## 8. RTK (token-optimised CLI)
@@ -347,6 +353,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.9 | 2026-09-19 | Reguła 7.5 „lakonicznie": odpowiedź jest krótka, chyba że użytkownik poprosi o długą. *Skąd:* prośba użytkownika powtórzona trzeci raz — „bądź w końcu lakoniczny!!! dodaj to sobie do reguł". |
 | 1.8 | 2026-09-19 | Sekcja 9 zyskuje `monitor/services.py`: **jeden punkt wejścia** podnoszący usługi tła maszyny (worker pytań, worker zleceń, bramka głosowa), wołany z hooka `SessionStart` i z Autostartu. *Skąd:* trzy procesy startowały trzema różnymi drogami (wpis logowania, ręcznie, otwarty terminal), a komentarz w `ask_worker.py` od miesiąca twierdził, że robi to hook `SessionStart` — czego żaden `settings.json` nie zawierał. Zmierzone 2026-09-19: worker zleceń nie działał od ~16 h (zamek nieodświeżany), więc zlecenie z telefonu czekałoby w kolejce bez śladu. Stan usługi jest **pomiarem** (świeżość zamka, otwarty port), bo zamek po martwym procesie to nie dowód. |
 | 1.7 | 2026-09-16 | Reguła 2.8: po lokalnym commicie automat **rebase'uje na upstream i pushuje** (czysty rebase, ponowne G3 i G4, konflikt → `abort` i commit lokalny, nigdy `--force`; wyłącznik `{"rebase": false}`). Bramka G2 zatrzymuje commit, gdy nowy plik źródłowy zostaje poza nim w katalogu, do którego commitujemy źródła. *Skąd:* decyzja użytkownika „nie ma sensu trzymać commitów niewypchniętych”; oraz znalezisko sesji Car — auto-sync wypchnął zmodyfikowany `poc/ask_server.py` bez nowych `poc/intent.py` i `poc/aliases.json`, czyli drzewo z `ImportError`, które pecet w pracy pobrałby `git pull` co godzinę, a watchdog restartowałby w milczeniu. |
 | 1.6 | 2026-09-15 | Reguła 2.9 „zadanie dłuższe niż 10 minut kończy się commitem i pushem — automatycznie" (zegar zadania w `heartbeat.py`, próg `MONITOR_AUTOSYNC_MIN_S` = 600 s, te same bramki G1–G5 co 2.8); 2.1 dostaje odsyłacz „poza 2.8 i 2.9". *Skąd:* decyzja użytkownika — im dłuższe zadanie, tym większa szansa, że nie ma go przy komputerze, a wynik jest potrzebny na repo z drugiej maszyny lub z innego projektu. |
