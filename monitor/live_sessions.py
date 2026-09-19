@@ -28,6 +28,7 @@ Standard library only. ASCII only.
 
 import json
 import os
+import shutil
 import subprocess
 
 # Same reason as ask_core: the worker calling this runs DETACHED, so every console child would
@@ -99,8 +100,18 @@ def list_windows(runner=None, timeout=TIMEOUT_S):
 
 
 def _run(args, timeout):
-    return subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", timeout=timeout, shell=(os.name == "nt"),
+    """Resolve `claude` once and run it WITHOUT a shell.
+
+    On Windows `claude` is claude.CMD, which is why this used shell=True. But that puts cmd.exe
+    between us and the program, and cmd.exe re-quotes the path -- on 2026-09-18 one call came
+    back with "'\"C:\...\claude.exe\"' is not recognized", and because a non-zero exit means
+    "cannot ask", the window list read as EMPTY: not "nothing is running", but "I could not
+    look", reported as the former. shutil.which resolves the .CMD itself, the same pattern
+    ask_core has used since it was written.
+    """
+    exe = shutil.which(args[0]) or args[0]
+    return subprocess.run([exe] + list(args[1:]), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout,
                           **QUIET_SUBPROCESS)
 
 
