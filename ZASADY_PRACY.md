@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.10 (2026-09-21). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.11 (2026-09-21). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -58,7 +58,7 @@ mówią, co się właściwie skończyło.
 
 ## 2. Git i dwie maszyny
 
-**2.1 Claude nie pushuje bez prośby** (poza 2.8 i 2.9). Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
+**2.1 Claude nie pushuje bez prośby** (poza 2.8, 2.9 i 2.10). Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
 wypchnij / przenoszę się na drugą maszynę", Claude sprawdza `git status -sb` i **albo pushuje na
 prośbę, albo mówi wprost: „commit jest lokalny, nie wypchnięty"**. *Dlaczego:* lokalny commit jest
 niewidoczny z drugiej maszyny; ciche pominięcie kosztuje pół dnia.
@@ -134,6 +134,23 @@ notatkę i mówi wprost, że push pójdzie sam.
 przy komputerze, a wynik jest mu potrzebny na repo, z drugiej maszyny albo z innego projektu.
 Reguła 2.1 (nie pushuj bez prośby) chroniła przed cichym pushem **decyzji**; tu decyzja jest
 podjęta z góry, a bramki pilnują ryzyka z 2.7.
+
+
+**2.10 Praca skonczona jest pracą wypchniętą — Claude pushuje sam.** Gdy zadanie
+dobiega końca (użytkownik mówi „kończymy", pyta o podsumowanie albo temat jest
+zamknięty), Claude **nie czeka na prośbę o push**: uzupełnia notatkę sesji,
+commituje i pushuje sam, po tych samych bramkach co automat z 2.8 — notatka sesji
+z dziś, allowlista ścieżek, zero wierszy `D` w `git diff --name-status`, zielony
+`pytest -q`, upstream przodkiem HEAD (a gdy nie jest: `pull --rebase --autostash`
+i bramki od nowa). Weryfikacja jak w 2.2: brak `[ahead N]`, `git rev-parse HEAD`
+= `origin/<branch>`, `git ls-remote origin <branch>`. **Nigdy `--force`.**
+Gdy któraś bramka nie trzyma, commit zostaje lokalny, a Claude **mówi wprost,
+czego brakuje** — cisza jest zakazana. W trakcie zadania 2.1 nadal obowiązuje:
+Claude nie pushuje w środku pracy, tylko na jej koniec.
+*Dlaczego:* decyzja użytkownika 2026-09-20 („wypychaj takie rzeczy sam
+automatycznie"). Automaty z 2.8 i 2.9 łapią sesję i długie zadanie, ale krótkie
+zadanie zamknięte w rozmowie zostawiało commit lokalny — czyli dokładnie ten
+stan, przed którym chroni 2.1, tyle że odwrotnie: niewidoczny z drugiej maszyny.
 
 ---
 
@@ -354,6 +371,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.11 | 2026-09-21 | Regula **2.10 'praca skonczona jest praca wypchnieta'** scalona z repo HA do kanonu (decyzja uzytkownika 2026-09-20, podjeta w tamtej sesji). Odsylacz w 2.1 rozszerzony o 2.10. *Skad:* `rules_sync.py --check` pokazal HA jako **zmodyfikowane**, a `--pull` ujawnil, ze oba pliki nosza numer **1.10 z roznymi datami i roznej tresci** -- czyli kanon i repo rozjechaly sie po cichu. Numer wersji nie jest tozsamoscia pliku; tozsamoscia jest tresc, i dlatego `--push` odmawia nadpisania pliku 'zmodyfikowanego'. |
 | 1.10 | 2026-09-21 | Sekcja 9 zyskuje `tools/ready.py` i `tools/statusline.py`: **konfiguracja maszyny ma jedno wejscie**, a pasek zuzycia jest jego czescia. *Skad:* uzytkownik pobral repo na drugiej maszynie i zapytal, dlaczego nie ma tam paska -- `tools/statusline.py` lezal w repo od 09-20, ale **nic go nie propagowalo i nic o nim nie mowilo**, bo instalacja jest jednorazowa i trzeba bylo o niej wiedziec. Plik w repo nie jest propagacja; propagacja to krok, ktory ktos wykona bez czytania cudzej notatki. |
 | 1.9 | 2026-09-19 | Reguła 7.5 „lakonicznie": odpowiedź jest krótka, chyba że użytkownik poprosi o długą. *Skąd:* prośba użytkownika powtórzona trzeci raz — „bądź w końcu lakoniczny!!! dodaj to sobie do reguł". |
 | 1.8 | 2026-09-19 | Sekcja 9 zyskuje `monitor/services.py`: **jeden punkt wejścia** podnoszący usługi tła maszyny (worker pytań, worker zleceń, bramka głosowa), wołany z hooka `SessionStart` i z Autostartu. *Skąd:* trzy procesy startowały trzema różnymi drogami (wpis logowania, ręcznie, otwarty terminal), a komentarz w `ask_worker.py` od miesiąca twierdził, że robi to hook `SessionStart` — czego żaden `settings.json` nie zawierał. Zmierzone 2026-09-19: worker zleceń nie działał od ~16 h (zamek nieodświeżany), więc zlecenie z telefonu czekałoby w kolejce bez śladu. Stan usługi jest **pomiarem** (świeżość zamka, otwarty port), bo zamek po martwym procesie to nie dowód. |
