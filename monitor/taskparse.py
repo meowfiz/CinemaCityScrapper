@@ -131,9 +131,73 @@ def summary_from_proposal(path, max_len=SUMMARY_MAX):
         return None
 
 
+OPENSPEC_MAX_DEPTH = 3  # how deep below the repo root a nested openspec/ may sit
+_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "archive"}
+
+
+def _has_changes(openspec_dir):
+    return os.path.isdir(os.path.join(openspec_dir, "changes"))
+
+
+def openspec_dir(repo_root):
+    """<root>/openspec, or else the shallowest nested .../openspec that has changes/.
+
+    Some projects keep their spec next to the material, not at the root (Python_I_2.0:
+    nowe/New/openspec). Hard-coding <root>/openspec showed such a repo as "no OpenSpec" on
+    the phone and in HA. The root still wins whenever it exists, so no other repo changes.
+    Ties at one depth break by sorted path, so the answer does not depend on listdir order.
+    None when there is no OpenSpec at all."""
+    top = os.path.join(repo_root, "openspec")
+    if _has_changes(top):
+        return top
+    level = [repo_root]
+    for _depth in range(OPENSPEC_MAX_DEPTH):
+        nxt = []
+        for base in level:
+            try:
+                names = sorted(os.listdir(base))
+            except OSError:
+                continue
+            for n in names:
+                p = os.path.join(base, n)
+                if n in _SKIP_DIRS or not os.path.isdir(p):
+                    continue
+                nxt.append(p)
+        for base in nxt:
+            cand = os.path.join(base, "openspec")
+            if _has_changes(cand):
+                return cand
+        level = nxt
+    return None
+
+
+def openspec_prefix(paths):
+    """Same rule as openspec_dir, on a flat list of repo paths (a GitHub tree has no dirs to
+    walk): "" for <root>/openspec, "nowe/New/" for a nested one, None when no change has a
+    tasks.md. Only active (non-archive) changes count."""
+    best = None
+    for p in paths:
+        m = CHANGE_TASKS_RE.match(p)
+        if not m:
+            continue
+        pre = m.group("pre")
+        if pre.count("/") > OPENSPEC_MAX_DEPTH:
+            continue
+        key = (pre.count("/"), pre)
+        if best is None or key < best:
+            best = key
+    return None if best is None else best[1]
+
+
+CHANGE_TASKS_RE = re.compile(r"^(?P<pre>(?:[^/]+/)*?)openspec/changes/(?!archive/)(?P<name>[^/]+)/tasks\.md$")
+
+
 def list_changes(repo_root):
     """[(name, change_dir)] for every non-archive change dir containing tasks.md."""
-    changes_dir = os.path.join(repo_root, "openspec", "changes")
+    spec = openspec_dir(repo_root)
+    if spec is None:
+        return []
+    changes_dir = os.path.join(spec, "changes")
     out = []
     for d in sorted(glob.glob(os.path.join(changes_dir, "*"))):
         if not os.path.isdir(d) or os.path.basename(d) == "archive":
