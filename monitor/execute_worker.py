@@ -28,6 +28,7 @@ Standard library only. ASCII only. Never raises out of main().
 """
 
 import argparse
+import datetime
 import json
 import os
 import platform
@@ -64,16 +65,46 @@ FLAGS_FILE = os.path.join(".claude", "orchestrator.json")
 BRANCH_PREFIX = "orch/"
 PROTECTED_BRANCHES = ("main", "master")
 
+# Every trace a remotely ordered task leaves starts with this, in the commit subject and in the
+# session note (user's decision 2026-09-20). Work ordered from a phone is reviewed differently
+# from work done at the keyboard -- nobody watched it happen -- and `git log --oneline` is where
+# that difference has to be visible without opening anything.
+REMOTE_TAG = "TRYB ZDALNY"
+NOTES_DIR = "notes/sesje"
+
+# Measured 2026-09-19 on the first real voice-ordered execute (task 92, testHuba): the agent
+# reported "python -m pytest -q i rtk pytest -q zostaly odrzucone przez bramke uprawnien" and
+# changed the repository WITHOUT running its tests. Cause: repos carry an RTK hook that rewrites
+# `pytest` to `rtk pytest` before the permission check sees it, and no rtk form was allowed. So
+# the allowlist must name the rewritten spellings too -- and, for the same reason, so must the
+# DENY list: a deny keyed on `git push` says nothing about `rtk git push`.
 AGENT_ALLOW = ["Read", "Glob", "Grep", "Write", "Edit", "Bash(git status:*)", "Bash(git diff:*)",
-               "Bash(git log:*)", "Bash(python -m pytest:*)", "Bash(pytest:*)"]
+               "Bash(git log:*)", "Bash(python -m pytest:*)", "Bash(pytest:*)",
+               "Bash(rtk pytest:*)", "Bash(rtk python -m pytest:*)",
+               "Bash(rtk git status:*)", "Bash(rtk git diff:*)", "Bash(rtk git log:*)"]
 AGENT_DENY = ["Bash(git push:*)", "Bash(git commit:*)", "Bash(git add:*)", "Bash(git checkout:*)",
-              "Bash(git reset:*)", "Bash(git rebase:*)", "Bash(gh:*)", "WebFetch", "WebSearch", "Task"]
+              "Bash(git reset:*)", "Bash(git rebase:*)", "Bash(gh:*)", "WebFetch", "WebSearch", "Task",
+              "Bash(rtk git push:*)", "Bash(rtk git commit:*)", "Bash(rtk git add:*)",
+              "Bash(rtk git checkout:*)", "Bash(rtk git reset:*)", "Bash(rtk git rebase:*)",
+              "Bash(rtk gh:*)", "Bash(rtk proxy:*)"]
 
 AGENT_SYSTEM = (
     "Wykonujesz jedno zadanie w repozytorium. Zmieniaj pliki narzedziami Write i Edit. "
     "Nie commituj, nie pushuj, nie zmieniaj galezi - zrobi to system po sprawdzeniu bramek. "
     "Uruchom testy, jesli repozytorium je ma. Jesli zadanie jest niejasne albo wymaga decyzji "
-    "projektowej, nie zgaduj: napisz, czego brakuje, i nie zmieniaj plikow."
+    "projektowej, nie zgaduj: napisz, czego brakuje, i nie zmieniaj plikow. "
+    # Measured 2026-09-21 (item 107): a throwaway patch script written inside the repository was
+    # emptied when it had done its job and `git add -A` committed the husk. The empty-file gate
+    # catches it now; saying it here stops it being created in the first place.
+    "Skryptow pomocniczych ani plikow tymczasowych NIE tworz w repozytorium - "
+    "jesli musisz, uzyj katalogu tymczasowego systemu. "
+    # Measured 2026-09-22 (item 157): the model ended its answer with "commit jeszcze nie
+    # poszedl [...] powiedz slowo, a zacommituje i wypchne to recznie" -- while this worker had
+    # already committed e5b5a4a, pushed orch/157 and opened PR #11. The user heard that sentence,
+    # believed nothing had happened, and went looking for the change in the live system.
+    "O commicie, pushu, galezi i pull requescie NIE PISZ ANI SLOWA - dzieja sie PO twojej "
+    "odpowiedzi i kazde twoje zdanie na ten temat bedzie nieprawdziwe. System dopisze fakty sam. "
+    "Napisz wylacznie, co zmieniles i co zmierzyles."
 )
 
 
@@ -118,9 +149,18 @@ def is_protected(branch):
 def dirty_lines(status_porcelain):
     """Porcelain lines that count as somebody's work in progress.
 
-    The flags file is excluded on purpose: it is this worker's own switch, it is often left
-    untracked, and refusing to work because of the file that enables working is a trap -- the
-    first run would always fail with a message about a clean tree.
+    Two kinds of file are excluded, and both exclusions exist because of a measured failure:
+
+    * the flags file -- it is this worker's own switch, it is often left untracked, and refusing
+      to work because of the file that enables working is a trap;
+    * UNTRACKED artefacts that rule 2.5 forbids committing anyway (logs, `run_files/`). A file
+      this worker would unstage two steps later cannot be a reason to refuse to start. Measured
+      2026-09-22: order 159 (back to navy) failed with "working tree is not clean" because
+      deploying order 157 had left the watcher's own pre-deploy backup in the tree fifteen
+      minutes earlier -- so one voice order silently disarmed the next one in that repository.
+
+    A MODIFIED tracked file is still a refusal, unconditionally: that one really is somebody
+    mid-change, and committing their work under a task they did not write is unforgivable.
     """
     out = []
     for line in (status_porcelain or "").splitlines():
@@ -128,6 +168,9 @@ def dirty_lines(status_porcelain):
             continue
         path = line[3:].strip().strip('"').replace("\\", "/")
         if path.endswith(FLAGS_FILE.replace("\\", "/")):
+            continue
+        untracked = line[:2] == "??"
+        if untracked and (path.startswith(BLOCKED_PREFIXES) or path.endswith(BLOCKED_SUFFIXES)):
             continue
         out.append(line)
     return out
@@ -140,8 +183,15 @@ def refuse_reason(flags, status_porcelain, item):
     """
     if not execute_enabled(flags):
         return "execute is off on this machine (.claude/orchestrator.json)"
-    if dirty_lines(status_porcelain):
-        return "working tree is not clean; refusing to commit somebody else's changes"
+    dirty = dirty_lines(status_porcelain)
+    if dirty:
+        # The files, by name. Measured 2026-09-22: the bare message cost a whole round of
+        # guessing -- the user read "working tree is not clean", had no way to know WHICH file,
+        # and the answer turned out to be a backup directory left by the previous order's own
+        # deployment. A refusal that does not say what to remove is a refusal you cannot act on.
+        return ("working tree is not clean; refusing to commit somebody else's changes: %s%s"
+                % (", ".join(ln[3:].strip().strip('"') for ln in dirty[:5]),
+                   " (+%d)" % (len(dirty) - 5) if len(dirty) > 5 else ""))
     if not (item.get("text") or "").strip():
         return "empty task text"
     return None
@@ -164,6 +214,30 @@ def artifacts(name_status):
         path = parts[-1].strip().strip('"').replace("\\", "/")
         if path.startswith(BLOCKED_PREFIXES) or path.endswith(BLOCKED_SUFFIXES):
             out.append(path)
+    return out
+
+
+def empty_additions(name_status, repo_path):
+    """Newly ADDED files that are zero bytes -- the agent's scaffolding, never its result.
+
+    Measured 2026-09-21 (item 107, HA): the agent wrote a throwaway patch script
+    `_patch_off_color.py` inside the repository to do the edit, truncated it when it was done,
+    and `git add -A` committed the empty husk alongside the real change. A suffix list cannot
+    catch this -- .py is legitimate content almost everywhere -- but a file that is BOTH new and
+    empty is not content anywhere. Unstaged rather than refused, exactly like an artefact: a
+    stray file is not a reason to throw away good work.
+    """
+    out = []
+    for line in (name_status or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[0].strip().upper().startswith("A"):
+            continue
+        path = parts[-1].strip().strip('"').replace("\\", "/")
+        try:
+            if os.path.getsize(os.path.join(repo_path, *path.split("/"))) == 0:
+                out.append(path)
+        except OSError:
+            continue
     return out
 
 
@@ -231,11 +305,123 @@ def deletions(name_status):
 
 
 def commit_message(item_id, text):
-    """One subject line plus the task, so `git log` answers 'why does this branch exist'."""
+    """One subject line plus the task, so `git log` answers 'why does this branch exist'.
+
+    The subject opens with REMOTE_TAG because `git log --oneline` on the other machine is the
+    first place anyone looks, and "nobody watched this happen" is the single most important
+    thing to know about such a commit before reading its diff.
+    """
     first = " ".join((text or "").split())
-    subject = first[:60] if first else "orchestrator task"
-    return "orch #%s: %s\n\nZadanie zlecone przez Project Orchestrator (work item %s).\n" % (
-        item_id, subject, item_id)
+    # The subject line stays within 72 characters WITH the tag, not before it: a prefix that
+    # pushes the line over the limit is how a convention quietly stops being followed.
+    budget = 72 - len("%s: orch #%s: " % (REMOTE_TAG, item_id))
+    subject = first[:budget] if first else "orchestrator task"
+    return ("%s: orch #%s: %s\n\nZadanie zlecone zdalnie przez Project Orchestrator "
+            "(work item %s). Nikt nie patrzyl na te zmiane w chwili jej powstania: przeszla "
+            "bramki (osobna galaz, czyste drzewo, zielone testy, zero usuniec).\n"
+            % (REMOTE_TAG, item_id, subject, item_id))
+
+
+def staged_paths(name_status):
+    """The paths in `git diff --cached --name-status`, in order."""
+    out = []
+    for line in (name_status or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            out.append(parts[-1].strip().strip('"').replace("\\", "/"))
+    return out
+
+
+def note_path(today):
+    """Rule 1.1's session note for today, as a repo-relative POSIX path."""
+    return "%s/%s-sesja.md" % (NOTES_DIR, today)
+
+
+def note_allowed(flags, today):
+    """Whether the session note may be written at all in this repository.
+
+    A repo with a narrow `paths` scope that does not include notes/ would otherwise have every
+    remote task fail on "zmiany poza dozwolonym zakresem" -- the note would be the violation.
+    Skipping the note is the right trade: the task is the point, the note is the record.
+    """
+    allowed = allowed_paths(flags)
+    if not allowed:
+        return True
+    path = note_path(today)
+    return any(path == p or path.startswith(p.rstrip("/") + "/") for p in allowed)
+
+
+def note_entry(item_id, text, branch, answer, changed_paths, when):
+    """The block appended to today's session note. Pure, so the wording is testable.
+
+    Facts only, and the ones rule 1.2 asks for: what was ordered, where it landed, which files,
+    what the agent said. No adjectives -- the worker does not get to grade its own work.
+    """
+    task = " ".join((text or "").split()) or "(bez opisu)"
+    said = " ".join((answer or "").split())
+    if len(said) > 1500:
+        said = said[:1500] + " [...]"
+    files = ", ".join(changed_paths[:20]) if changed_paths else "(brak)"
+    if len(changed_paths) > 20:
+        files += " (+%d)" % (len(changed_paths) - 20)
+    return "\n".join([
+        "",
+        "## %s -- zlecenie #%s (%s)" % (REMOTE_TAG, item_id, when),
+        "",
+        "**Zlecone zdalnie** (telefon / auto / panel), wykonane bez nikogo przy klawiaturze.",
+        "",
+        "- **Zadanie:** %s" % task,
+        "- **Galaz:** %s" % branch,
+        "- **Pliki:** %s" % files,
+        # Not "testy zielone": a repository with no tests passes this gate too, and a note that
+        # claims a green suite where none ran is the kind of sentence somebody later quotes.
+        "- **Bramki:** czyste drzewo przed startem, testy nie zglosily bledu, zero usuniec.",
+        "",
+        "**Co zglosil agent:** %s" % (said or "(nic)"),
+        "",
+        "**Do sprawdzenia przez czlowieka:** ta zmiana nie byla ogladana w chwili powstania.",
+        "",
+    ])
+
+
+def note_header(today):
+    """The rule 1.1 skeleton, used only when today's note does not exist yet."""
+    return "\n".join([
+        "# Sesja %s" % today,
+        "",
+        "## Co zrobiono",
+        "",
+        "## Kluczowe decyzje / zmiany semantyki",
+        "",
+        "## Aktywne TODO / pending",
+        "",
+        "## Pliki zmienione",
+        "",
+    ])
+
+
+def write_session_note(repo_path, flags, item_id, text, branch, answer, changed_paths, now=None):
+    """Append today's remote-mode entry to notes/sesje/<today>-sesja.md. Returns the relative
+    path written, or None when the repository's scope forbids it.
+
+    Appending, never rewriting: a human may have written today's note already, and this is one
+    more thing that happened today, not a replacement for it.
+    """
+    now = now or datetime.datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    if not note_allowed(flags, today):
+        return None
+    rel = note_path(today)
+    target = os.path.join(repo_path, *rel.split("/"))
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        head = "" if os.path.exists(target) else note_header(today)
+        with open(target, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(head + note_entry(item_id, text, branch, answer, changed_paths,
+                                       now.strftime("%H:%M")))
+    except OSError:
+        return None  # a note that cannot be written is not a reason to throw away the work
+    return rel
 
 
 def outcome_error(reason):
@@ -325,7 +511,7 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
         git(["add", "-A"], repo_path, runner=git_runner)
         git(["reset", "-q", "--", FLAGS_FILE], repo_path, runner=git_runner)  # never commit the switch
         staged = git_out(["diff", "--cached", "--name-status"], repo_path, git_runner)
-        junk = artifacts(staged)
+        junk = artifacts(staged) + empty_additions(staged, repo_path)
         if junk:
             # Unstaged, not refused: a log the agent happened to touch is not a reason to throw
             # away good work -- it is a reason not to publish the log (rule 2.5).
@@ -354,6 +540,17 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
             return outcome_error("refusing a commit that deletes %d file(s): %s"
                                  % (len(gone), ", ".join(gone[:5])))
 
+        # Rule 1.1 applies to a machine exactly as it applies to a person: work that leaves no
+        # note is work the next session starts by excavating. Written AFTER every gate has
+        # passed, so the note can only ever describe a change that is actually being committed,
+        # and staged by name -- it is the worker's own bookkeeping, not part of the change, so
+        # it is not counted against max_files or the paths scope (note_allowed checks that
+        # separately, and skips the note rather than failing the task).
+        note_rel = write_session_note(repo_path, flags, item_id, item.get("text"), branch,
+                                      answer, staged_paths(staged))
+        if note_rel:
+            git(["add", "--", note_rel], repo_path, runner=git_runner)
+
         say(on_progress, 85, "testy przeszly, commituje")
         done = git(["-c", "user.email=orchestrator@local", "-c", "user.name=orchestrator",
                     "commit", "-q", "-m", commit_message(item_id, item.get("text"))],
@@ -367,14 +564,15 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
             pushed = git(["push", "-q", "--set-upstream", "origin", branch], repo_path,
                          timeout=300.0, runner=git_runner)
             if pushed.returncode != 0:
-                return {"result": (answer or "")[:20000], "commit_hash": commit_hash,
-                        "branch": branch,
+                return {"result": with_outcome(answer, branch=branch, commit_hash=commit_hash)[:20000],
+                        "commit_hash": commit_hash, "branch": branch,
                         "error": "committed locally, push failed: %s" % (pushed.stderr or "")[:200]}
             if pr_enabled(flags):
                 pr_url = _open_pr(repo_path, branch, item_id, item.get("text"))
 
-        return {"result": (answer or "")[:20000], "commit_hash": commit_hash,
-                "branch": branch, "pr_url": pr_url}
+        return {"result": with_outcome(answer, branch=branch, commit_hash=commit_hash,
+                                       pr_url=pr_url, pushed=push_enabled(flags))[:20000],
+                "commit_hash": commit_hash, "branch": branch, "pr_url": pr_url}
     except Exception as exc:  # noqa: BLE001 - a crash must still report
         return outcome_error("execute worker crashed: %r" % (exc,))
     finally:
@@ -384,12 +582,57 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
             git(["checkout", "-q", start_branch], repo_path, runner=git_runner)
 
 
+def outcome_sentence(branch=None, commit_hash=None, pr_url=None, pushed=False):
+    """Jedno zdanie FAKTU o tym, gdzie wyladowala zmiana. Czysta funkcja.
+
+    Zmierzone 2026-09-22 (zlecenie 157): odpowiedz, ktora uzytkownik uslyszal na telefonie,
+    konczyla sie zdaniem "commit jeszcze nie poszedl, powiedz slowo, a zacommituje" -- a commit,
+    push i pull request byly juz zrobione. Uzytkownik poszedl szukac zmiany w zywym systemie,
+    nie znalazl jej i mial prawo uznac, ze nic sie nie stalo. Model nie moze byc zrodlem prawdy
+    o krokach, ktore dzieja sie po jego odpowiedzi -- wiec to zdanie dopisuje worker, z tego,
+    co naprawde zrobil.
+
+    Najwazniejsza informacja to NIE numer commita, a to, ze zmiana **czeka na scalenie**: bez
+    scalenia nie trafi do zywego systemu, i to jest cala roznica miedzy "zrobione" a "widac to".
+    """
+    krotki = (commit_hash or "")[:8]
+    if not commit_hash:
+        return ""
+    if pr_url:
+        return ("Zmiana jest na galezi %s (commit %s) i czeka na scalenie: %s. "
+                "Do zywego systemu trafi PO scaleniu, nie wczesniej." % (branch, krotki, pr_url))
+    if pushed:
+        return ("Zmiana jest na galezi %s (commit %s), wypchnieta, ale bez pull requesta -- "
+                "scal ja recznie, inaczej nie trafi do zywego systemu." % (branch, krotki))
+    return ("Commit %s siedzi lokalnie na galezi %s i NIE jest wypchniety -- z drugiej maszyny "
+            "go nie widac." % (krotki, branch))
+
+
+def with_outcome(answer, **kwargs):
+    """Odpowiedz modelu plus zdanie faktu. Osobno, zeby dalo sie testowac sklejanie."""
+    tail = outcome_sentence(**kwargs)
+    said = (answer or "").strip()
+    if not tail:
+        return said
+    return (said + "\n\n" + tail) if said else tail
+
+
 def _run_agent(repo_path, item, agent, timeout):
-    """The model gets Write/Edit but no git: commits are the system's decision, not the model's."""
+    """The model gets Write/Edit but no git: commits are the system's decision, not the model's.
+
+    The conversation continues across orders (`thread_id`), exactly as it already did for
+    questions. Without it every order started from nothing, so "a teraz to samo dla odkurzacza"
+    was answered by a model that had never heard of the first change -- the user has to restate
+    the whole task every time, which is precisely when a spoken interface stops being worth
+    using. The server already put the thread on the item (agent-experience A); only this end of
+    the pipe ignored it, so questions remembered and orders did not.
+    """
     if agent is not None:
         return agent(repo_path, item)
     return ask_core.ask([repo_path], item.get("text") or "", system=AGENT_SYSTEM,
-                        timeout=timeout, allow=AGENT_ALLOW, deny=AGENT_DENY, use_digest=True)
+                        timeout=timeout, allow=AGENT_ALLOW, deny=AGENT_DENY, use_digest=True,
+                        thread_id=item.get("thread_id"),
+                        first_turn=bool(item.get("thread_new", 1)))
 
 
 def _run_tests(repo_path, flags, git_runner=None):
