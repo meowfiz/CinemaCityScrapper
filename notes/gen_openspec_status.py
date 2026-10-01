@@ -20,8 +20,11 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "monitor"))
 import taskparse  # noqa: E402
 
-CHANGES_DIR = os.path.join(REPO_ROOT, "openspec", "changes")
-OUTPUT_PATH = os.path.join(REPO_ROOT, "openspec", "STATUS.md")
+# <root>/openspec, or a nested one (e.g. nowe/New/openspec) -- the same rule the monitor uses,
+# so STATUS.md lands next to the changes it counts. getattr: an older taskparse in a repo.
+_SPEC = getattr(taskparse, "openspec_dir", lambda r: None)(REPO_ROOT) or os.path.join(REPO_ROOT, "openspec")
+CHANGES_DIR = os.path.join(_SPEC, "changes")
+OUTPUT_PATH = os.path.join(_SPEC, "STATUS.md")
 
 
 def md_escape(text):
