@@ -50,7 +50,26 @@ GATEWAY_LOCK = os.path.join(tempfile.gettempdir(), "monitor_voice_gateway.lock")
 GATEWAY_PORT = int(os.environ.get("ASK_VOICE_PORT", "8788"))
 PROBE_TIMEOUT_S = 1.0
 
+# The dashboard watcher lives in the HA repository (it is the only one with dashboards) and is
+# started from here, because this file is the one place that answers "what is running on this
+# machine". Absent HA clone = the service simply does not apply, exactly like the gateway in a
+# repository that has none.
+DASH_REL = os.path.join("project_files", "python", "deploy_dashboard.py")
+DASH_LOCK = os.path.join(tempfile.gettempdir(), "monitor_dashboards.lock")
+DASH_INTERVAL_S = int(os.environ.get("MONITOR_DASH_INTERVAL_S", "300"))
+DASH_TTL_S = DASH_INTERVAL_S * 3   # two missed rounds is noise; three is a dead process
+
 STATE_UP, STATE_DOWN, STATE_OFF = "dziala", "nie dziala", "wylaczone"
+
+
+def dashboard_script(repo_map=None):
+    """Path to the HA repo's deploy script, or None when this machine has no HA clone."""
+    mapping = repo_map if repo_map is not None else ask_worker.load_repo_map()
+    ha = mapping.get("HA")
+    if not ha:
+        return None
+    path = os.path.join(ha, DASH_REL)
+    return path if os.path.exists(path) else None
 
 
 # -- the voice gateway -----------------------------------------------------------------------
@@ -194,10 +213,91 @@ def stop_execute(cfg, kill=os.kill):
     return "stopped" if stopped else "not-running"
 
 
+def pid_on_port(port, runner=None):
+    """The PID listening on `port`, or None. Injected runner so this is testable.
+
+    Needed because the gateway is the one service that can be running without this module's
+    pid file: started by hand from an open terminal, it holds the port and nothing here knows
+    its PID. Measured 2026-09-20: a gateway from three days earlier survived `--restart`, which
+    reported success -- the port answered, so the state table said "dziala", and the freshly
+    deployed code simply never ran.
+    """
+    run = runner or (lambda args: subprocess.run(args, capture_output=True, timeout=10))
+    try:
+        if os.name == "nt":
+            out = run(["netstat", "-ano", "-p", "TCP"])
+        else:
+            out = run(["lsof", "-t", "-i", ":%d" % port, "-sTCP:LISTEN"])
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = out.stdout.decode("utf-8", "replace") if isinstance(out.stdout, bytes) else (out.stdout or "")
+    return parse_listener_pid(text, port)
+
+
+def parse_listener_pid(text, port):
+    """Pure: the listening PID for `port` in netstat/lsof output, or None.
+
+    Only LISTENING rows count -- an outbound connection to the same port number is not the
+    server, and killing it would be killing a client.
+    """
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) == 1 and parts[0].isdigit():      # lsof -t
+            return int(parts[0])
+        if len(parts) >= 5 and parts[0].upper() == "TCP" and "LISTEN" in parts[3].upper():
+            local = parts[1]
+            if local.rsplit(":", 1)[-1] == str(port) and parts[-1].isdigit():
+                return int(parts[-1])
+    return None
+
+
 def stop_gateway(cfg, kill=os.kill):
+    """Stop whatever is serving, not only what we started.
+
+    The pid file is tried first because it is exact; the port owner is the fallback, and it is
+    the case that actually happens after somebody ran the gateway by hand once.
+    """
     stopped = kill_pid(read_pid(GATEWAY_LOCK), kill)
+    if not stopped:
+        stopped = kill_pid(pid_on_port(GATEWAY_PORT), kill)
     try:
         os.remove(GATEWAY_LOCK)
+    except OSError:
+        pass
+    return "stopped" if stopped else "not-running"
+
+
+def dashboards_state(cfg, now=None, probe=None):
+    """Is the dashboard watcher alive? Lock freshness, like the workers -- a loop that sleeps
+    five minutes cannot be probed by a port."""
+    script = dashboard_script()
+    if not script:
+        return STATE_OFF, "ta maszyna nie ma klonu HA (nie dotyczy)"
+    live = ask_worker.lock_is_live(DASH_LOCK, time.time() if now is None else now, DASH_TTL_S)
+    return (STATE_UP if live else STATE_DOWN), \
+        "dashboardy HA na zywo po scaleniu (co %d s)" % DASH_INTERVAL_S
+
+
+def start_dashboards(cfg):
+    script = dashboard_script()
+    if not script:
+        return "skipped"
+    if dashboards_state(cfg)[0] == STATE_UP:
+        return "running"
+    # The HA repo's own venv: deploy_dashboard.py needs websockets and pyyaml, which the base
+    # interpreter here does not have. Same rule as execute_worker._python_for().
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(script)))
+    venv = os.path.join(repo, ".venv", "Scripts", "python.exe")
+    python = venv if os.path.exists(venv) else quiet_interpreter()
+    proc = spawn_detached([python, script, "--watch", str(DASH_INTERVAL_S), "--lock", DASH_LOCK], cwd=repo)
+    write_pid(DASH_LOCK, proc.pid)
+    return "spawned"
+
+
+def stop_dashboards(cfg, kill=os.kill):
+    stopped = kill_pid(read_pid(DASH_LOCK), kill)
+    try:
+        os.remove(DASH_LOCK)
     except OSError:
         pass
     return "stopped" if stopped else "not-running"
@@ -207,6 +307,7 @@ SERVICES = [
     ("ask", "worker pytan", ask_state, start_ask, stop_ask),
     ("execute", "worker zlecen", execute_state, start_execute, stop_execute),
     ("voice", "bramka glosowa", gateway_state, start_gateway, stop_gateway),
+    ("dashboards", "dashboardy HA", dashboards_state, start_dashboards, stop_dashboards),
 ]
 
 
