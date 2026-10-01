@@ -200,7 +200,12 @@ def digest(path, max_bytes=DIGEST_MAX_BYTES, git_runner=None):
     head = _first_section(_read(os.path.join(path, "notes", "start.md")))
     if head:
         parts.append("Z notes/start.md:\n" + head)
-    status = _read(os.path.join(path, "openspec", "STATUS.md"), 2000)
+    try:
+        import taskparse
+        spec = taskparse.openspec_dir(path) or os.path.join(path, "openspec")
+    except (ImportError, AttributeError):
+        spec = os.path.join(path, "openspec")
+    status = _read(os.path.join(spec, "STATUS.md"), 2000)
     line = next((ln for ln in status.splitlines() if "tasks complete" in ln or "Overall" in ln), "")
     if line:
         parts.append("Z openspec/STATUS.md: " + line.strip().lstrip("*# "))
@@ -284,6 +289,32 @@ def for_speech(text, limit=SPEECH_MAX):
 # -- the call ------------------------------------------------------------------------------------
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+LIMIT_MARKS = ("usage limit", "limit reached", "rate limit", "quota", "limit wyczerpany",
+               "out of credit", "insufficient credit")
+
+
+def explain_failure(returncode, stdout, stderr):
+    """Jedno zdanie o tym, DLACZEGO `claude -p` nie odpowiedzial.
+
+    Zmierzone 2026-09-21 (zadanie 118): uzytkownik uslyszal z telefonu "claude exited 1:" --
+    kod wyjscia i pusty tekst. Prawdziwy powod (wyczerpany limit) CLI wypisuje na **stdout**,
+    a ten komunikat czytal tylko stderr. Kod bledu bez przyczyny jest gorszy niz brak
+    komunikatu: wyglada na awarie systemu, a byla to zwykla sciana limitu, po ktorej wystarczy
+    poczekac.
+    """
+    out = " ".join((stdout or "").split())
+    err = " ".join((stderr or "").split())
+    haystack = ("%s %s" % (out, err)).lower()
+    if any(mark in haystack for mark in LIMIT_MARKS):
+        detail = (err or out)[:300]
+        return ("wyczerpany limit uzycia Claude -- to nie jest awaria, trzeba poczekac. %s"
+                % detail).strip()
+    # Nie ma powodu? Powiedz przynajmniej, ktore wyjscie bylo puste, zamiast udawac, ze
+    # cokolwiek wiemy.
+    detail = err or out or "(bez komunikatu na stdout i stderr)"
+    return ("claude zakonczyl sie kodem %d: %s" % (returncode, detail))[:1000]
 
 
 def parse_output(stdout):
@@ -394,7 +425,7 @@ def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, run
             except (subprocess.TimeoutExpired, Exception) as exc:  # noqa: B014
                 return None, "runner failed after thread retry: %r" % (exc,)
         if out.returncode != 0:
-            return None, ("claude exited %d: %s" % (out.returncode, (out.stderr or "").strip()))[:1000]
+            return None, explain_failure(out.returncode, out.stdout, out.stderr)
     text, run_stats = parse_output(out.stdout)
     if stats is not None and run_stats:
         stats.update(run_stats)
