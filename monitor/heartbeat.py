@@ -45,6 +45,7 @@ import time
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import repo_touch  # noqa: E402
 import taskparse  # noqa: E402
 
 EVENTS = ("session_start", "prompt", "tool", "stop", "stop_failure", "waiting", "session_end",
@@ -561,10 +562,10 @@ def build_event(event, hook, cfg, label=None, agents=None):
     return ev
 
 
-def post(url, token, payload):
+def post_to(url, token, path, payload):
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        url.rstrip("/") + "/api/events",
+        url.rstrip("/") + path,
         data=data,
         method="POST",
         headers={
@@ -575,6 +576,66 @@ def post(url, token, payload):
     )
     with urllib.request.urlopen(req, timeout=NET_TIMEOUT_S) as resp:
         return resp.status
+
+
+def post(url, token, payload):
+    return post_to(url, token, "/api/events", payload)
+
+
+# -- which repo is this session actually changing (change touched-repos) -------------------------
+# The heartbeat says what the session's own repo is doing. A session that edits ANOTHER repo --
+# half a day of work in HA from a window opened in project_integration, 2026-09-19 -- left that
+# repo looking idle. PostToolUse already carries the tool and its arguments, so a write names the
+# repo for free. Everything below is wrapped: a malformed payload, a missing map or a dead server
+# must cost the hook nothing.
+
+def touch_state_path(session_id):
+    return os.path.join(tempfile.gettempdir(), "monitor_touch_%s.json" % (session_id or "nosession"))
+
+
+def read_touch_state(session_id):
+    try:
+        with open(touch_state_path(session_id), encoding="utf-8") as f:
+            state = json.load(f)
+        return state if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def report_touch(cfg, url, token, hook, now=None):
+    """Tell the server that this session wrote into a repo that is not its own. Returns the repo
+    name reported, or None. Never raises -- this runs inside a 5 s hook on every tool call."""
+    try:
+        cwd = hook.get("cwd") or os.getcwd()
+        repo_map = repo_touch.load_repo_map()
+        # the session's own repo is resolved from the SAME map, by path: asking git would mean a
+        # subprocess on every write, and the map is what the answer is compared against anyway
+        repo = repo_touch.touched_repo(hook.get("tool_name"), hook.get("tool_input"),
+                                       repo_map, repo_touch.repo_for_path(cwd, repo_map))
+        if repo is None:
+            return None
+        session_id = hook.get("session_id")
+        now = time.time() if now is None else now
+        state, send = repo_touch.next_touch(read_touch_state(session_id), repo, now)
+        if not send:
+            return None
+        try:
+            with open(touch_state_path(session_id), "w", encoding="utf-8") as f:
+                json.dump(state, f)
+        except OSError:
+            pass
+        # the repo NAME and the machine, never the path on disk and never the file's content.
+        # repo_name() shells out to git; past the throttle that is at most once per 20 s per repo.
+        post_to(url, token, "/api/repos/touched", {
+            "machine": cfg.get("MONITOR_MACHINE") or platform.node(),
+            "repo": repo,
+            "source_repo": repo_name(cwd),
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        })
+        return repo
+    except Exception as e:
+        log("touch report failed: %r" % (e,))
+        return None
 
 
 def main(argv=None):
@@ -620,6 +681,10 @@ def main(argv=None):
 
     if not url or not token:
         return 0
+    # change touched-repos: done BEFORE the throttle below. A write into another repo is the only
+    # signal that repo is alive at all, and the tool throttle would swallow most of them.
+    if args.event == "tool":
+        report_touch(cfg, url, token, hook)
     # a start or a finish of a background agent is the only moment its name is known: never throttle it
     if agents_changed is False and throttled(args.event, hook.get("session_id")):
         return 0
