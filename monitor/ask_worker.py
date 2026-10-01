@@ -48,6 +48,7 @@ import capabilities  # noqa: E402
 import heartbeat  # noqa: E402
 import live_sessions  # noqa: E402
 import repo_locations  # noqa: E402
+import repo_touch  # noqa: E402
 
 POLL_S = 30.0
 ANSWER_TIMEOUT_S = 180.0
@@ -60,7 +61,10 @@ BEAT_TIMEOUT_S = 10.0
 CLAIM_WAIT_S = 25.0
 WORKER_VERSION = "1.1"
 READ_ONLY_TOOLS = "Read,Grep,Glob"
-REPOS_FILE = os.path.join(os.path.expanduser("~"), ".claude", "monitor_repos.env")
+# the map of this machine's clones: one parser, in repo_touch.py, because the PostToolUse hook
+# reads the same file and must not import this module to do it (change touched-repos)
+REPOS_FILE = repo_touch.REPOS_FILE
+load_repo_map = repo_touch.load_repo_map
 ANSWER_MAX = 4000
 
 
@@ -173,24 +177,6 @@ def register_repo(name, path, map_path=None):
     return True
 
 
-def load_repo_map(path=None):
-    """{repo name: absolute path} for the repos this machine can answer about."""
-    out = {}
-    try:
-        with open(path or os.environ.get("MONITOR_REPOS_FILE") or REPOS_FILE, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                name, target = line.split("=", 1)
-                name, target = name.strip(), target.strip().strip('"').strip("'")
-                if name and target:
-                    out[name] = target
-    except OSError:
-        pass
-    return out
-
-
 def machine_name(cfg):
     return cfg.get("MONITOR_MACHINE") or platform.node()
 
@@ -295,10 +281,52 @@ def send_windows(cfg, lister=None):
         return 0
 
 
-def system_prompt():
+# Zmiana rozmowa-zamiast-klasyfikatora (D2/D4). Rozpoznanie "to nie jest pytanie, to prosba
+# o zmiane kodu" robi ten sam model, ktory i tak czyta repozytorium -- zamiast listy czasownikow
+# na serwerze, ktora 2026-09-21 dala trzy awarie w ciagu jednego dnia.
+#
+# Protokol jest jedna linia na koncu, nie JSON-em wokol calej odpowiedzi: `claude -p` oddaje tu
+# tekst CZYTANY NA GLOS, wiec owiniecie go w JSON znaczyloby, ze kazda odpowiedz zalezy od tego,
+# czy model domknal nawias. Linia psuje sie lagodnie -- gdy jej zabraknie, zostaje zwykla
+# odpowiedz, czyli dzisiejsze zachowanie.
+PROPOSAL_MARK = "ZLECENIE:"
+CONVERSATIONAL_SUFFIX = (
+    " ROZPOZNAWANIE PROSBY O ZMIANE: jesli uzytkownik nie pyta, tylko PROSI O ZMIANE w kodzie, "
+    "odpowiedz normalnie (co zamierzasz zrobic), a na samym koncu dopisz OSOBNA, OSTATNIA linie "
+    "w formacie 'ZLECENIE: <pelne polecenie>'. Polecenie rozwin tak, zeby bylo zrozumiale bez "
+    "historii rozmowy: zamiast 'pokoloruj je na czarno' napisz, ktore elementy i w ktorym pliku. "
+    "Gdy uzytkownik tylko PYTA, tej linii NIE dopisuj. Sam niczego nie zmieniaj ani nie "
+    "commituj -- od wykonania jest osobny krok, ktory uzytkownik musi potwierdzic."
+)
+
+
+def system_prompt(conversational=False):
     """Instructions for the headless agent. The phone wording is the core's default; the car bridge
     passes its own (three sentences, no markdown) -- that is a product difference, not a technical one."""
+    if conversational:
+        return ask_core.DEFAULT_SYSTEM + CONVERSATIONAL_SUFFIX
     return ask_core.DEFAULT_SYSTEM
+
+
+def split_proposal(answer):
+    """(tekst do wypowiedzenia, propozycja zlecenia albo None).
+
+    Odcina wylacznie OSTATNIA linie i tylko wtedy, gdy zaczyna sie od znacznika -- wzmianka
+    o zleceniu w srodku zdania nie jest propozycja, a odpowiedz o tym, jak dziala kolejka
+    zadan, nie moze przez przypadek utworzyc zadania.
+    """
+    if not answer:
+        return answer, None
+    lines = answer.rstrip().splitlines()
+    if not lines:
+        return answer, None
+    last = lines[-1].strip().lstrip("*").lstrip("-").strip()
+    if not last.upper().startswith(PROPOSAL_MARK):
+        return answer, None
+    task = last[len(PROPOSAL_MARK):].strip().strip("*`").strip()
+    if len(task) < 5:
+        return answer, None   # sam znacznik bez tresci nie jest zleceniem
+    return "\n".join(lines[:-1]).rstrip(), task
 
 
 def answer_prompt(question):
@@ -340,7 +368,8 @@ ALL_REPOS = "*"  # the phone asks across every repo this machine has, not one na
 
 
 def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_paths=(),
-            refresh=True, use_digest=True, thread_id=None, first_turn=True, stats=None):
+            refresh=True, use_digest=True, thread_id=None, first_turn=True, stats=None,
+            conversational=False):
     """(answer, error) for one queued question. A thin client of ask_core (change ask-core): the
     call itself, the freshness pull and the sentence limit live there, shared with the car bridge.
 
@@ -354,7 +383,7 @@ def run_ask(repo_path, question, timeout_s=ANSWER_TIMEOUT_S, runner=None, extra_
     having; the car path decides on its own numbers."""
     paths = [repo_path] + [p for p in extra_paths if p and p != repo_path]
     context = ask_core.refresh_all(paths) if refresh else None
-    return ask_core.ask(paths, question, system=system_prompt(), timeout=timeout_s,
+    return ask_core.ask(paths, question, system=system_prompt(conversational), timeout=timeout_s,
                         runner=runner, context=context, use_digest=use_digest,
                         thread_id=thread_id, first_turn=first_turn, stats=stats)
 
@@ -372,7 +401,13 @@ def resolve_paths(repo, repo_map):
 def handle(cfg, item, repo_map, runner=None):
     """Answer one claimed item and report the result. Returns the outcome string."""
     repo = item.get("repo")
-    if item.get("kind") != "ask":
+    # "analyze" is a question with a bigger appetite, not a different job: it reads the repository
+    # and answers, exactly like "ask", and the tools it needs are the read-only ones this worker
+    # already has. Measured 2026-09-19: the server routes analyze here (it is not an execute kind),
+    # this worker answered "unsupported kind", and the item FAILED -- so "zdiagnozuj, dlaczego
+    # czajnik sam ustaje" died on arrival, which is precisely how a person reports a fault. Same
+    # failure the comment in server/routing.py records for the first execute item on 2026-09-18.
+    if item.get("kind") not in ("ask", "analyze"):
         api(cfg, "POST", "/api/inbox/%d/answer" % item["id"], {"error": "unsupported kind"})
         return "unsupported"
     path, extra = resolve_paths(repo, repo_map)
@@ -388,10 +423,18 @@ def handle(cfg, item, repo_map, runner=None):
     answer, error = run_ask(path, item.get("text") or "", _float(cfg, "MONITOR_ASK_TIMEOUT_S",
                                                                 ANSWER_TIMEOUT_S), runner, extra,
                             thread_id=item.get("thread_id"),
-                            first_turn=bool(item.get("thread_new", 1)), stats=stats)
+                            first_turn=bool(item.get("thread_new", 1)), stats=stats,
+                            conversational=bool(item.get("session_id")))
     # change agent-experience D.4: what this one answer actually cost, so "jak najtaniej" is a
     # measurement rather than a belief.
+    # Propozycja zlecenia jest odcinana TU, a nie na serwerze: to worker zna protokol swojego
+    # promptu. Serwer dostaje osobne pole i nie musi wiedziec, ze cokolwiek bylo doklejone.
+    proposal = None
+    if answer:
+        answer, proposal = split_proposal(answer)
     body = {"answer": answer} if answer else {"error": error or "no answer"}
+    if proposal:
+        body["proposal"] = proposal
     if stats.get("cost_usd") is not None:
         body["cost_usd"] = stats["cost_usd"]
         body["tokens"] = int(stats.get("tokens_in") or 0) + int(stats.get("tokens_out") or 0)
