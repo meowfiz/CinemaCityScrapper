@@ -278,6 +278,20 @@ def dashboards_state(cfg, now=None, probe=None):
         "dashboardy HA na zywo po scaleniu (co %d s)" % DASH_INTERVAL_S
 
 
+def dashboard_python(repo, exists=os.path.exists):
+    """The HA venv's pythonw.exe (no console at all), else its python.exe, else ours.
+
+    With python.exe the watcher showed up as a Windows Terminal window titled
+    '...\\HA\\.venv\\Scripts\\python.exe' -- and closing that stray-looking window killed the
+    service (found dead 2026-10-05). pythonw has no console to show or to close."""
+    scripts = os.path.join(repo, ".venv", "Scripts")
+    for exe in ("pythonw.exe", "python.exe"):
+        cand = os.path.join(scripts, exe)
+        if exists(cand):
+            return cand
+    return quiet_interpreter()
+
+
 def start_dashboards(cfg):
     script = dashboard_script()
     if not script:
@@ -287,8 +301,7 @@ def start_dashboards(cfg):
     # The HA repo's own venv: deploy_dashboard.py needs websockets and pyyaml, which the base
     # interpreter here does not have. Same rule as execute_worker._python_for().
     repo = os.path.dirname(os.path.dirname(os.path.dirname(script)))
-    venv = os.path.join(repo, ".venv", "Scripts", "python.exe")
-    python = venv if os.path.exists(venv) else quiet_interpreter()
+    python = dashboard_python(repo)
     proc = spawn_detached([python, script, "--watch", str(DASH_INTERVAL_S), "--lock", DASH_LOCK], cwd=repo)
     write_pid(DASH_LOCK, proc.pid)
     return "spawned"
