@@ -108,7 +108,7 @@ def load_config(root):
     """Optional per-repo overrides: {"allow": ["server/", ...], "tests": ["python", "-m", ...]}.
     Absent or unreadable file = the defaults above, so no repo changes behaviour by accident."""
     cfg = {"allow": list(ALLOWED_PREFIXES), "files": list(ALLOWED_FILES), "tests": list(TESTS),
-           "rebase": True}  # an unpushed commit is invisible from the other machine (2.8, 2026-09-16)
+           "rebase": True, "note": True}  # an unpushed commit is invisible from the other machine (2.8, 2026-09-16)
     try:
         with open(os.path.join(root, CONFIG_REL), encoding="utf-8") as f:
             data = json.load(f)
@@ -122,6 +122,8 @@ def load_config(root):
         cfg["tests"] = [str(x) for x in data["tests"]]
     if isinstance(data.get("rebase"), bool):
         cfg["rebase"] = data["rebase"]
+    if isinstance(data.get("note"), bool):
+        cfg["note"] = data["note"]
     return cfg
 
 
@@ -208,13 +210,18 @@ def deleted_rows(name_status: str) -> list:
     return [ln for ln in name_status.splitlines() if ln[:1] == "D"]
 
 
-def decide(entries: list, last_commit_paths: list, today: str, allow=None, files=None) -> tuple:
-    """(action, reason, classification). action: 'commit' | 'push-only' | 'skip'."""
+def decide(entries: list, last_commit_paths: list, today: str, allow=None, files=None,
+           need_note=True) -> tuple:
+    """(action, reason, classification). action: 'commit' | 'push-only' | 'skip'.
+
+    need_note=False (`"note": false` in .claude/auto_sync.json) switches G1 off for a CONTENT repo
+    edited outside Claude sessions (nihongo: lessons in Obsidian, user 2026-10-06 "must commit by
+    itself"). G2 (allowlist), G3 (no deletions), G4 and G5 stay."""
     c = classify(entries, allow, files)
     if c["blocked"]:
         return "skip", "G2 tracked artefacts changed: %s" % ", ".join(c["blocked"][:5]), c
     if c["commit"]:
-        if not has_today_note(c["commit"], today) and not has_today_note(last_commit_paths, today):
+        if need_note and not has_today_note(c["commit"], today) and not has_today_note(last_commit_paths, today):
             return "skip", "G1 no session note for %s" % today, c
         risky = risky_leftovers(c["commit"], c["leave"])
         if risky:
@@ -224,6 +231,8 @@ def decide(entries: list, last_commit_paths: list, today: str, allow=None, files
         return "commit", "%d paths to commit, %d untracked left alone" % (len(c["commit"]), len(c["leave"])), c
     if has_today_note(last_commit_paths, today):
         return "push-only", "tree clean, last commit carries the session note", c
+    if not need_note:
+        return "push-only", "tree clean, G1 off for this repo (.claude/auto_sync.json)", c
     return "skip", "G1 nothing to commit and last commit has no session note for %s" % today, c
 
 
@@ -278,7 +287,7 @@ def run(root, dry_run=False):
             return outcome, report
         entries = parse_status(git(STATUS_ARGS, root, check=True, raw=True))
         last_paths = git(["show", "--pretty=format:", "--name-only", "HEAD"], root).splitlines()
-        action, reason, c = decide(entries, last_paths, today, cfg["allow"], cfg["files"])
+        action, reason, c = decide(entries, last_paths, today, cfg["allow"], cfg["files"], cfg["note"])
         report.append("decision=%s (%s)" % (action, reason))
         if c["leave"]:
             report.append("untracked left alone: %d (e.g. %s)" % (len(c["leave"]), ", ".join(c["leave"][:3])))
