@@ -36,6 +36,9 @@ import subprocess
 import sys
 import tempfile
 import time
+# Uslugi tla chodza na pythonw (bez konsoli): kazdy podproces bez tej flagi dostaje WLASNA konsole,
+# a z Windows Terminal jako terminalem domyslnym -- okno, ktore zostaje (2026-10-05: 432 okna).
+QUIET = {"creationflags": 0x08000000} if os.name == "nt" else {}  # CREATE_NO_WINDOW
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -82,7 +85,7 @@ def gateway_bind():
     if os.environ.get("ASK_VOICE_BIND"):
         return os.environ["ASK_VOICE_BIND"]
     try:
-        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, timeout=5)
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, timeout=5, **QUIET)
         ip = out.stdout.decode("utf-8", "replace").strip().splitlines()
         if out.returncode == 0 and ip:
             return ip[0].strip()
@@ -222,7 +225,7 @@ def pid_on_port(port, runner=None):
     reported success -- the port answered, so the state table said "dziala", and the freshly
     deployed code simply never ran.
     """
-    run = runner or (lambda args: subprocess.run(args, capture_output=True, timeout=10))
+    run = runner or (lambda args: subprocess.run(args, capture_output=True, timeout=10, **QUIET))
     try:
         if os.name == "nt":
             out = run(["netstat", "-ano", "-p", "TCP"])
