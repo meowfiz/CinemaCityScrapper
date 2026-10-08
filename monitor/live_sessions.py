@@ -89,14 +89,28 @@ def list_windows(runner=None, timeout=TIMEOUT_S):
     An empty list means "nothing to report", never an error: this is decoration on a heartbeat,
     and a machine whose `claude` is missing or slow must keep beating.
     """
+    return list_windows_checked(runner, timeout)[1]
+
+
+def list_windows_checked(runner=None, timeout=TIMEOUT_S):
+    """(complete, windows). `complete` is True only when the CLI answered with a JSON list, so an
+    empty list can be told apart from "could not look". The server ends a session on the strength
+    of its absence from a COMPLETE list (a window killed with its tmux session sends no
+    session_end), and must never do that on a failed look (2026-10-08)."""
     run = runner or _run
     try:
         result = run(["claude", "agents", "--json"], timeout)
     except (OSError, subprocess.SubprocessError):
-        return []
+        return False, []
     if getattr(result, "returncode", 1) != 0:
-        return []
-    return parse_windows(getattr(result, "stdout", ""))
+        return False, []
+    stdout = getattr(result, "stdout", "") or ""
+    start = stdout.find("[")
+    try:
+        complete = start >= 0 and isinstance(json.loads(stdout[start:]), list)
+    except ValueError:
+        complete = False
+    return complete, parse_windows(stdout)
 
 
 def _run(args, timeout):
