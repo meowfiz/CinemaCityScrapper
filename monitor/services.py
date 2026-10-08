@@ -319,11 +319,54 @@ def stop_dashboards(cfg, kill=os.kill):
     return "stopped" if stopped else "not-running"
 
 
+# -- cli-session-bridge: windows in tmux, ssh/phone access, "do okna" dispatcher ---------------
+# Like the gateway, it lives in project_integration's tools/ and does not apply anywhere else.
+# --restart replaces the dispatcher and ttyd but never the WSL keepalive: stopping that would shut
+# WSL down and kill every detached window -- the running Claudes this exists to keep.
+
+BRIDGE = os.path.join(ROOT, "tools", "cli_bridge.py")
+
+
+def _bridge():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("cli_bridge", BRIDGE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def bridge_state(cfg, now=None, probe=None):
+    if not os.path.exists(BRIDGE):
+        return STATE_OFF, "tego repozytorium nie dotyczy (brak tools/cli_bridge.py)"
+    cb = _bridge()
+    if not cb.host_enabled():
+        return STATE_OFF, "maszyna nie jest hostem (python tools/cli_bridge.py --apply)"
+    return (STATE_UP if cb.runtime_up() else STATE_DOWN), "okna w tmux: ssh, telefon :%d, 'do okna'" % cb.TTYD_PORT
+
+
+def start_bridge(cfg):
+    state, _note = bridge_state(cfg)
+    if state == STATE_OFF:
+        return "skipped"
+    if state == STATE_UP:
+        return "running"
+    _bridge().ensure()
+    return "spawned"
+
+
+def stop_bridge(cfg, kill=os.kill):
+    if not os.path.exists(BRIDGE):
+        return "not-running"
+    _bridge().stop(keepalive=False)
+    return "stopped"
+
+
 SERVICES = [
     ("ask", "worker pytan", ask_state, start_ask, stop_ask),
     ("execute", "worker zlecen", execute_state, start_execute, stop_execute),
     ("voice", "bramka glosowa", gateway_state, start_gateway, stop_gateway),
     ("dashboards", "dashboardy HA", dashboards_state, start_dashboards, stop_dashboards),
+    ("bridge", "okna zdalnie", bridge_state, start_bridge, stop_bridge),
 ]
 
 
