@@ -272,9 +272,13 @@ def send_windows(cfg, lister=None):
     raises, for the same reason send_beat does not.
     """
     try:
-        windows = (lister or live_sessions.list_windows)()
+        if lister:
+            complete, windows = False, lister()
+        else:
+            complete, windows = live_sessions.list_windows_checked()
         api(cfg, "POST", "/api/windows",
-            {"machine": machine_name(cfg), "windows": windows}, timeout=BEAT_TIMEOUT_S)
+            {"machine": machine_name(cfg), "windows": windows, "complete": complete},
+            timeout=BEAT_TIMEOUT_S)
         return len(windows)
     except Exception as e:  # noqa: BLE001
         heartbeat.log("ask worker windows report failed: %r" % (e,))
