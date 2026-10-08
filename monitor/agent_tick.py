@@ -98,9 +98,27 @@ def tick_seconds(cfg=None):
     return _float_env(cfg if cfg is not None else heartbeat.load_config(), "MONITOR_AGENT_TICK_S", TICK_S)
 
 
-def should_continue(agents, started, now, max_s):
-    """Keep ticking only while something is running and the hard lifetime is not spent."""
-    return bool(agents) and (now - started) < max_s
+def should_continue(agents, started, now, max_s, alive=None):
+    """Keep ticking only while something is running, the hard lifetime is not spent, and the
+    session's window has not been proven gone (`alive` False; None = could not tell, keep going).
+    2026-10-08: windows closed with a background task kept three tickers reporting dead sessions
+    as 'working' -- the registry is never emptied when Claude itself is gone."""
+    return bool(agents) and (now - started) < max_s and alive is not False
+
+
+def session_alive(session_id, checked=None):
+    """True/False from this machine's COMPLETE list of live Claude windows, None if it cannot be
+    read. `checked` is live_sessions.list_windows_checked, injectable for tests."""
+    try:
+        if checked is None:
+            import live_sessions
+            checked = live_sessions.list_windows_checked
+        complete, windows = checked()
+    except Exception:  # noqa: BLE001 -- a broken lookup must not stop a real agent's ticks
+        return None
+    if not complete:
+        return None
+    return any(w.get("session_id") == session_id for w in windows)
 
 
 def send_tick(cfg, session_id, agents, cwd):
@@ -117,7 +135,7 @@ def send_tick(cfg, session_id, agents, cwd):
         return False
 
 
-def run(session_id, cwd, once=False, sleep=time.sleep, now_fn=time.time):
+def run(session_id, cwd, once=False, sleep=time.sleep, now_fn=time.time, alive_fn=session_alive):
     cfg = heartbeat.load_config()
     tick_s = tick_seconds(cfg)
     max_s = _float_env(cfg, "MONITOR_AGENT_TICK_MAX_S", TICK_MAX_S)
@@ -131,7 +149,8 @@ def run(session_id, cwd, once=False, sleep=time.sleep, now_fn=time.time):
                 sleep(tick_s)
             agents = heartbeat.agents_payload(heartbeat.read_agents(session_id))
             now = now_fn()
-            if not should_continue(agents, started, now, max_s):
+            if not should_continue(agents, started, now, max_s,
+                                   alive_fn(session_id) if agents else None):
                 return ticks
             touch_lock(session_id, now)
             if send_tick(cfg, session_id, agents, cwd):
