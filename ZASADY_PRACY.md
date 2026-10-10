@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.11 (2026-09-21). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.12 (2026-10-10). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -58,7 +58,7 @@ mówią, co się właściwie skończyło.
 
 ## 2. Git i dwie maszyny
 
-**2.1 Claude nie pushuje bez prośby** (poza 2.8, 2.9 i 2.10). Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
+**2.1 Claude nie pushuje bez prośby** (poza 2.8, 2.9, 2.10 i 2.11). Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
 wypchnij / przenoszę się na drugą maszynę", Claude sprawdza `git status -sb` i **albo pushuje na
 prośbę, albo mówi wprost: „commit jest lokalny, nie wypchnięty"**. *Dlaczego:* lokalny commit jest
 niewidoczny z drugiej maszyny; ciche pominięcie kosztuje pół dnia.
@@ -151,6 +151,23 @@ Claude nie pushuje w środku pracy, tylko na jej koniec.
 automatycznie"). Automaty z 2.8 i 2.9 łapią sesję i długie zadanie, ale krótkie
 zadanie zamknięte w rozmowie zostawiało commit lokalny — czyli dokładnie ten
 stan, przed którym chroni 2.1, tyle że odwrotnie: niewidoczny z drugiej maszyny.
+
+**2.11 Praca samodzielna agenta kończy się commitem i pushem — bezwzględnie.**
+Każdy agent działający w trybie autonomous (pętla profesor-student, Agent worktree,
+orchestrator, remote tasks, dowolna sesja Agent uruchomiona w tle) **na koniec
+pracy** — naturalny koniec zadania, STOP od użytkownika, osiągnięta godzina końca
+pętli — commituje i pushuje przez te same bramki G1–G5 co automat z 2.8: notatka
+sesji z dziś, allowlista ścieżek, zero wierszy `D` w `git diff --name-status`,
+zielony `pytest -q`, upstream przodkiem HEAD (gdy nie jest: `pull --rebase
+--autostash` i bramki od nowa). Weryfikacja jak w 2.2. **Nigdy `--force`.**
+Gdy którakolwiek bramka nie trzyma — commit zostaje lokalny, agent raportuje
+**wprost, czego brakuje** — cisza jest zakazana. W trakcie pracy 2.1 nadal
+obowiązuje: agent nie pushuje w środku zadania, tylko na jego koniec.
+*Dlaczego:* decyzja użytkownika 2026-10-10 — „jak pracują samodzielnie to na
+koniec muszą wypychać zmiany, bo druga maszyna musi móc zawsze pobrać najświeższe
+repo". Reguły 2.8 i 2.9 łapią odpowiednio koniec sesji i zadanie >= 10 min, a 2.10
+łapie Claude kończącego zadanie w rozmowie; żadna z nich nie opisuje jawnie
+agenta autonomous, który może skończyć pracę poza rozmową i bez hooka sesji.
 
 ---
 
@@ -371,6 +388,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.12 | 2026-10-10 | Regula **2.11 'praca samodzielna agenta konczy sie commitem i pushem'** -- rozszerzenie 2.10 na tryby autonomous (petla profesor-student, Agent worktree, orchestrator, remote tasks). Odsylacz w 2.1 rozszerzony o 2.11. *Skad:* decyzja uzytkownika „jak pracuja samodzielnie to na koniec musza wypychac zmiany, bo druga maszyna musi moc zawsze pobrac najswiezsze repo". |
 | 1.11 | 2026-09-21 | Regula **2.10 'praca skonczona jest praca wypchnieta'** scalona z repo HA do kanonu (decyzja uzytkownika 2026-09-20, podjeta w tamtej sesji). Odsylacz w 2.1 rozszerzony o 2.10. *Skad:* `rules_sync.py --check` pokazal HA jako **zmodyfikowane**, a `--pull` ujawnil, ze oba pliki nosza numer **1.10 z roznymi datami i roznej tresci** -- czyli kanon i repo rozjechaly sie po cichu. Numer wersji nie jest tozsamoscia pliku; tozsamoscia jest tresc, i dlatego `--push` odmawia nadpisania pliku 'zmodyfikowanego'. |
 | 1.10 | 2026-09-21 | Sekcja 9 zyskuje `tools/ready.py` i `tools/statusline.py`: **konfiguracja maszyny ma jedno wejscie**, a pasek zuzycia jest jego czescia. *Skad:* uzytkownik pobral repo na drugiej maszynie i zapytal, dlaczego nie ma tam paska -- `tools/statusline.py` lezal w repo od 09-20, ale **nic go nie propagowalo i nic o nim nie mowilo**, bo instalacja jest jednorazowa i trzeba bylo o niej wiedziec. Plik w repo nie jest propagacja; propagacja to krok, ktory ktos wykona bez czytania cudzej notatki. |
 | 1.9 | 2026-09-19 | Reguła 7.5 „lakonicznie": odpowiedź jest krótka, chyba że użytkownik poprosi o długą. *Skąd:* prośba użytkownika powtórzona trzeci raz — „bądź w końcu lakoniczny!!! dodaj to sobie do reguł". |
