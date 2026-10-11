@@ -55,7 +55,7 @@ def describe(project_id, path, runner=None):
     the clone is there.
     """
     row = {"project_id": project_id, "path": path, "present": False,
-           "remote": None, "branch": None, "clean": None}
+           "remote": None, "branch": None, "clean": None, "ahead": None, "sync": None}
     if not path or not os.path.isdir(path):
         return row
     row["present"] = True
@@ -70,9 +70,39 @@ def describe(project_id, path, runner=None):
         status = run(["status", "--porcelain"], path)
         if status.returncode == 0:
             row["clean"] = not (status.stdout or "").strip()
+        # change unpushed-alert: commits that exist only here. Against the last fetched upstream,
+        # without fetching -- a report must not touch the network once per repo per minute.
+        ahead = run(["rev-list", "--count", "@{u}..HEAD"], path)
+        if ahead.returncode == 0 and (ahead.stdout or "").strip().isdigit():
+            row["ahead"] = int(ahead.stdout.strip())
     except (OSError, subprocess.SubprocessError):
         pass  # the directory is there; that alone answers the question this registry exists for
+    row["sync"] = last_sync(path)
     return row
+
+
+def parse_sync_log(text):
+    """The last auto-sync block -> {"at", "result", "reason"}, or None. Pure.
+
+    Blocks are written by auto_sync.log_block: "=== <iso time>", the outcome, then report lines;
+    the reason is the last report line, the same one auto-sync puts on the phone label."""
+    blocks = [b for b in (text or "").split("\n=== ") if b.strip()]
+    if not blocks:
+        return None
+    lines = [ln.strip() for ln in blocks[-1].lstrip("= ").splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return None
+    return {"at": lines[0], "result": lines[1], "reason": lines[-1] if len(lines) > 2 else ""}
+
+
+def last_sync(path, tail_bytes=8192):
+    try:
+        with open(os.path.join(path, "project_files", "run_files", "auto_sync.log"), "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - tail_bytes))
+            return parse_sync_log(fh.read().decode("utf-8", "replace"))
+    except OSError:
+        return None
 
 
 def collect(repo_map, runner=None):
