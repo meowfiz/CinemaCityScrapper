@@ -104,7 +104,11 @@ AGENT_SYSTEM = (
     # believed nothing had happened, and went looking for the change in the live system.
     "O commicie, pushu, galezi i pull requescie NIE PISZ ANI SLOWA - dzieja sie PO twojej "
     "odpowiedzi i kazde twoje zdanie na ten temat bedzie nieprawdziwe. System dopisze fakty sam. "
-    "Napisz wylacznie, co zmieniles i co zmierzyles."
+    "Napisz wylacznie, co zmieniles i co zmierzyles. "
+    # ZASADY 7.6: the order came by voice, and the answer is spoken -- only this line is read out.
+    "Ostatnia linia odpowiedzi: 'Glosowo: ' i jedno-dwa krotkie zdania potoczna polszczyzna, "
+    "jak czlowiek do czlowieka: co zrobiles albo czego nie dalo sie zrobic i dlaczego, i co "
+    "uzytkownik moze teraz zrobic. Bez liczb, sciezek, nazw plikow, komend i skrotow."
 )
 
 
