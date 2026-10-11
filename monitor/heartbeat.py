@@ -49,7 +49,7 @@ import repo_touch  # noqa: E402
 import taskparse  # noqa: E402
 
 EVENTS = ("session_start", "prompt", "tool", "stop", "stop_failure", "waiting", "session_end",
-          "label", "progress")
+          "label", "progress", "unpushed")
 NET_TIMEOUT_S = 2.0
 TOOL_THROTTLE_S = 30.0
 PROMPT_EXCERPT_LEN = 120
@@ -638,6 +638,61 @@ def report_touch(cfg, url, token, hook, now=None):
         return None
 
 
+# -- commits that live on one machine only (change unpushed-alert) -------------------------------
+# 2026-10-11: a night of work on GEIH38C stayed in a local commit because G4 failed, and the other
+# machine had no way to know. Each repo now reports its own state at session start and right
+# after auto-sync; the session start reads back the list for ALL repos and machines and puts it in
+# front of Claude, who tells the user before anything else.
+
+def report_unpushed(cfg, url, token, root, project):
+    """This repo's ahead count and last auto-sync outcome -> server. Never raises."""
+    try:
+        # imported here, not at the top: a repo whose pack predates repo_locations.py must keep
+        # every other hook working -- an ImportError at import time would silence them all
+        import repo_locations
+        row = repo_locations.describe(project, root)
+        post_to(url, token, "/api/repos/unpushed",
+                {"machine": cfg.get("MONITOR_MACHINE") or platform.node(), "repos": [row]})
+        return row
+    except Exception as e:
+        log("unpushed report failed: %r" % (e,))
+        return None
+
+
+def get_from(url, token, path):
+    req = urllib.request.Request(url.rstrip("/") + path, headers={
+        "Authorization": "Bearer " + token, "User-Agent": "monitor-heartbeat/1"})
+    with urllib.request.urlopen(req, timeout=NET_TIMEOUT_S) as resp:
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def unpushed_lines(rows):
+    """The SessionStart warning, one line per machine+repo, or [] when nothing is stranded. Pure."""
+    out = []
+    for r in rows or []:
+        why = r.get("reason") or r.get("result") or "brak pushu"
+        out.append("- %s: %s -- %d commit(y) tylko lokalnie na galezi %s (od %s; %s)"
+                   % (r.get("machine"), r.get("repo"), int(r.get("ahead") or 0),
+                      r.get("branch") or "?", str(r.get("since") or "?")[:16], str(why)[:90]))
+    if out:
+        out.insert(0, "UWAGA -- powiedz to uzytkownikowi na poczatku odpowiedzi: niewypchniete "
+                      "commity (praca niewidoczna z innych maszyn):")
+        out.append("Na tamtej maszynie: notatka sesji + `python monitor/auto_sync.py` albo "
+                   "naprawa testow (ZASADY 2.8); stad nie da sie tego wypchnac.")
+    return out
+
+
+def warn_unpushed(cfg, url, token, cwd):
+    try:
+        root = repo_root(cwd)
+        report_unpushed(cfg, url, token, root, repo_name(cwd))
+        lines = unpushed_lines(get_from(url, token, "/api/repos/unpushed").get("unpushed"))
+        if lines:
+            print("\n".join(lines))
+    except Exception as e:
+        log("unpushed check failed: %r" % (e,))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--event", required=True, choices=EVENTS)
@@ -661,7 +716,7 @@ def main(argv=None):
     if os.environ.get("MONITOR_HEADLESS") == "1":
         return 0
 
-    hook = {} if args.event in ("label", "progress") else read_stdin_json()
+    hook = {} if args.event in ("label", "progress", "unpushed") else read_stdin_json()
 
     # Rule 2.9: a task longer than MONITOR_AUTOSYNC_MIN_S ends with a gated commit + push. Done
     # before the monitor check on purpose -- this is about git, not about the dashboard.
@@ -681,6 +736,9 @@ def main(argv=None):
 
     if not url or not token:
         return 0
+    if args.event == "unpushed":  # auto_sync.py, right after it decided pushed / local / skipped
+        report_unpushed(cfg, url, token, repo_root(os.getcwd()), repo_name(os.getcwd()))
+        return 0
     # change touched-repos: done BEFORE the throttle below. A write into another repo is the only
     # signal that repo is alive at all, and the tool throttle would swallow most of them.
     if args.event == "tool":
@@ -698,6 +756,8 @@ def main(argv=None):
             log("server returned %s for %s" % (status, args.event))
     except Exception as e:
         log("post failed (%s): %r" % (args.event, e))
+    if args.event == "session_start":
+        warn_unpushed(cfg, url, token, hook.get("cwd") or os.getcwd())
     return 0
 
 
