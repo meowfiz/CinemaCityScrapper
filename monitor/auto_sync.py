@@ -274,6 +274,19 @@ def heartbeat_label(root, text):
             pass
 
 
+def report_unpushed(root):
+    """Tell the monitor how many commits are stranded here (change unpushed-alert). Right now,
+    not at the worker's next report: the machine may be switched off a minute after the session
+    ends, and a commit that stayed local is exactly what the other machine must hear about."""
+    hb = os.path.join(root, "monitor", "heartbeat.py")
+    if os.path.exists(hb):
+        try:
+            subprocess.run([sys.executable, hb, "--event", "unpushed"], cwd=root, timeout=20,
+                           capture_output=True, **QUIET_SUBPROCESS)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
 def run(root, dry_run=False):
     today = _dt.date.today().isoformat()
     cfg = load_config(root)
@@ -425,6 +438,7 @@ def main(argv=None) -> int:
     reason = report[-1] if report else ""
     if not a.dry_run:
         heartbeat_label(root, "auto-sync: %s (%s)" % (outcome, reason[:50]))
+        report_unpushed(root)
     for ln in [outcome] + report:
         print(ln)
     return 0 if (outcome == "pushed" or not a.strict) else 1
