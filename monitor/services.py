@@ -174,12 +174,40 @@ def execute_state(cfg, now=None, probe=None):
     return (STATE_UP if live else STATE_DOWN), note
 
 
+def _voice_env_value(key):
+    """Read a KEY=VALUE from ~/.claude/voice.env without importing voice_gateway (avoids
+    pulling in faster_whisper at status time)."""
+    path = os.path.join(os.path.expanduser("~"), ".claude", "voice.env")
+    if not os.path.exists(path):
+        return os.environ.get(key, "")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for ln in fh:
+                ln = ln.strip()
+                if ln and not ln.startswith("#") and "=" in ln:
+                    k, v = ln.split("=", 1)
+                    if k.strip() == key:
+                        return v.strip()
+    except OSError:
+        pass
+    return os.environ.get(key, "")
+
+
 def gateway_state(cfg, now=None, probe=None):
     if not os.path.exists(GATEWAY):
         return STATE_OFF, "tego repozytorium nie dotyczy (brak tools/voice_gateway.py)"
     host = gateway_bind()
     up = port_open(host, GATEWAY_PORT, connect=probe)
-    return (STATE_UP if up else STATE_DOWN), "bramka glosowa na %s:%d" % (host, GATEWAY_PORT)
+    stt_hosts = _voice_env_value("ASK_STT_HOSTS") or _voice_env_value("ASK_STT_REMOTE") or "local"
+    whisper = _voice_env_value("ASK_WHISPER") or "small"
+    device = _voice_env_value("ASK_WHISPER_DEVICE") or "cpu"
+    tts_engine = _voice_env_value("ASK_VOICE_TTS_ENGINE") or "edge"
+    tts_hosts = (_voice_env_value("ASK_VOICE_TTS_HOSTS")
+                 or _voice_env_value("ASK_VOICE_TTS_REMOTE")
+                 or ("local" if tts_engine != "chatterbox" else "none"))
+    note = ("bramka glosowa na %s:%d; stt=%s whisper=%s/%s; tts=%s hosts=%s"
+            % (host, GATEWAY_PORT, stt_hosts, whisper, device, tts_engine, tts_hosts))
+    return (STATE_UP if up else STATE_DOWN), note
 
 
 def start_ask(cfg):
@@ -409,6 +437,42 @@ def wait_until_up(cfg, names, deadline_s=6.0, sleep=time.sleep, probe=None):
     return False
 
 
+DELEGATE_TASK = "ClaudeServicesRemoteStart"
+
+
+def must_delegate(env, os_name):
+    """True when services would be started from an ssh shell on Windows. Pure.
+
+    Found 2026-10-11 (GEIH38C, reported by the VCC session): `ready.py --apply` over ssh
+    restarted every service as a child of the ssh session; OpenSSH killed them all on
+    disconnect and the gateway was down for minutes. DETACHED_PROCESS does not leave the
+    session's job object."""
+    return os_name == "nt" and bool(env.get("SSH_CONNECTION")) and not env.get("SERVICES_NO_DELEGATE")
+
+
+def delegate_to_desktop(argv):
+    """Run the same command as a one-shot task in the logged-on user's session (/it): there it
+    survives the ssh disconnect, sees the user's credentials, and starts exactly as at logon."""
+    py = sys.executable.replace("python.exe", "pythonw.exe")
+    cmd = '"%s" "%s" %s' % (py if os.path.exists(py) else sys.executable, os.path.abspath(__file__),
+                            " ".join(a for a in argv if a != "--json"))
+    run = lambda a: subprocess.run(a, capture_output=True, text=True, **QUIET)  # noqa: E731
+    created = run(["schtasks", "/Create", "/F", "/TN", DELEGATE_TASK, "/SC", "ONCE", "/ST", "23:59",
+                   "/IT", "/TR", cmd])
+    started = created.returncode == 0 and run(["schtasks", "/Run", "/TN", DELEGATE_TASK]).returncode == 0
+    if created.returncode == 0:
+        time.sleep(2)  # the running instance survives the delete; a kept "once" task would fire again at 23:59
+        run(["schtasks", "/Delete", "/F", "/TN", DELEGATE_TASK])
+    if started:
+        print("zdalna powloka (ssh): uslugi startuja w sesji uzytkownika przez zadanie %s -- "
+              "sprawdz za chwile: python monitor/services.py" % DELEGATE_TASK)
+        return 0
+    print("zdalna powloka (ssh) i nie udalo sie przekazac startu do sesji uzytkownika: %s -- "
+          "uslugi uruchomione stad zginelyby po rozlaczeniu, wiec ich nie startuje"
+          % (created.stderr or created.stdout).strip()[:200])
+    return 2
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -421,6 +485,9 @@ def main(argv=None):
     # window, for an answer nobody reads.
     ap.add_argument("--quiet", action="store_true", help="start, print nothing, do not wait (hooks)")
     args = ap.parse_args(argv)
+
+    if (args.start or args.restart) and must_delegate(os.environ, os.name):
+        return delegate_to_desktop(argv if argv is not None else sys.argv[1:])
 
     cfg = heartbeat.load_config()
 
