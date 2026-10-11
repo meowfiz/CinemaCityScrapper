@@ -266,12 +266,28 @@ def cut_sentences(text, n):
     return " ".join(parts[:n]).strip() if len(parts) > n else text.strip()
 
 
+SPOKEN_MARK = "Glosowo:"
+
+
+def spoken_summary(text):
+    """The answer's own line for the ear (ZASADY 7.6): text after the LAST "Glosowo:" line, or
+    None. A voice-triggered prompt ends with one; speaking it instead of the whole technical
+    answer is the difference between "zrobione, mozesz testowac" and a minute of paths. Pure."""
+    found = None
+    for line in (text or "").splitlines():
+        s = line.strip().lstrip("*_> ").strip()
+        if s.lower().startswith(SPOKEN_MARK.lower()):
+            found = s[len(SPOKEN_MARK):].strip(" *_")
+    return found or None
+
+
 def for_speech(text, limit=SPEECH_MAX):
     """Strip what a loudspeaker cannot say: code blocks, markdown marks, then squeeze whitespace.
 
     Truncation cuts on a sentence boundary, never mid-word: a voice that stops in the middle of
     a word sounds broken, while a slightly shorter answer that ends on a period sounds finished.
     """
+    text = spoken_summary(text) or text
     text = re.sub(r"```.*?```", " ", text or "", flags=re.S)
     text = re.sub(r"[*_`#>|\[\]]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
