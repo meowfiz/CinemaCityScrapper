@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.12 (2026-10-10). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.13 (2026-10-11). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -336,6 +336,23 @@ opisywania drogi, którą się doszło. Liczby i nazwy plików zostają; narracj
 użytkownik prosił o to trzeci raz (2026-09-18, 2026-09-19: „bądź w końcu lakoniczny"), a ściana
 tekstu ukrywa jedno zdanie, po które sięgnął.
 
+**7.6 Polecenie głosowe dostaje odpowiedź do ucha.** Prompt zaczynający się od `[glos]`
+(dokłada go bramka głosowa, dyspozytor „do okna X” i zlecenia z telefonu; użytkownik może go
+też wpisać ręcznie, np. w oknie projektu na telefonie) ma **dwie linie `Glosowo: …`**:
+1. **po rozeznaniu, przed właściwą robotą** — co mogę zrobić, co jest potrzebne albo czego nie
+   zrobię i dlaczego; przy pytaniu, na które odpowiedź jest od razu, wystarczy jedna linia;
+2. **na koniec** (krótkie zadania) — co wyszło i co użytkownik może teraz zrobić.
+
+Linia `Glosowo:` to **jedno–dwa zdania potoczną polszczyzną, jak człowiek do człowieka**: bez
+liczb (chyba że jedna jest sednem), ścieżek, nazw plików, komend, skrótów commitów, gałęzi.
+Reszta odpowiedzi zostaje techniczna, jak zawsze — **czytana jest tylko linia `Glosowo:`**
+(bramka bierze ostatnią; dyspozytor okien mówi każdą nową od razu, gdy się pojawi), głosem
+wybranym na stronie bramki / w HA. Projekt może w swoim `CLAUDE.md` ogłosić **tryb rozmowy**
+(np. nauka języka): wtedy cała odpowiedź jest do odsłuchu i znacznik nie jest potrzebny.
+*Dlaczego:* prośba użytkownika 2026-10-11 — przy zleceniu z auta chce usłyszeć „co mogę zrobić /
+co zrobiłem”, a nie zalew parametrów; bramka czytała dotąd całą odpowiedź modelu, z PR-ami
+i ścieżkami.
+
 ---
 
 ## 8. RTK (token-optimised CLI)
@@ -388,6 +405,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.13 | 2026-10-11 | Regula **7.6 „polecenie glosowe dostaje odpowiedz do ucha"**: prompt z `[glos]` ma linie `Glosowo:` po rozeznaniu i na koniec; czytana jest tylko ona, wybranym glosem; projekt moze oglosic tryb rozmowy. *Skad:* prosba uzytkownika -- przy zleceniu z auta chce uslyszec, co Claude moze zrobic i co zrobil, a bramka czytala cala techniczna odpowiedz. |
 | 1.12 | 2026-10-10 | Regula **2.11 'praca samodzielna agenta konczy sie commitem i pushem'** -- rozszerzenie 2.10 na tryby autonomous (petla profesor-student, Agent worktree, orchestrator, remote tasks). Odsylacz w 2.1 rozszerzony o 2.11. *Skad:* decyzja uzytkownika „jak pracuja samodzielnie to na koniec musza wypychac zmiany, bo druga maszyna musi moc zawsze pobrac najswiezsze repo". |
 | 1.11 | 2026-09-21 | Regula **2.10 'praca skonczona jest praca wypchnieta'** scalona z repo HA do kanonu (decyzja uzytkownika 2026-09-20, podjeta w tamtej sesji). Odsylacz w 2.1 rozszerzony o 2.10. *Skad:* `rules_sync.py --check` pokazal HA jako **zmodyfikowane**, a `--pull` ujawnil, ze oba pliki nosza numer **1.10 z roznymi datami i roznej tresci** -- czyli kanon i repo rozjechaly sie po cichu. Numer wersji nie jest tozsamoscia pliku; tozsamoscia jest tresc, i dlatego `--push` odmawia nadpisania pliku 'zmodyfikowanego'. |
 | 1.10 | 2026-09-21 | Sekcja 9 zyskuje `tools/ready.py` i `tools/statusline.py`: **konfiguracja maszyny ma jedno wejscie**, a pasek zuzycia jest jego czescia. *Skad:* uzytkownik pobral repo na drugiej maszynie i zapytal, dlaczego nie ma tam paska -- `tools/statusline.py` lezal w repo od 09-20, ale **nic go nie propagowalo i nic o nim nie mowilo**, bo instalacja jest jednorazowa i trzeba bylo o niej wiedziec. Plik w repo nie jest propagacja; propagacja to krok, ktory ktos wykona bez czytania cudzej notatki. |
