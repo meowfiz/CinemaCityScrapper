@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.13 (2026-10-11). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.14 (2026-10-11). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -353,6 +353,14 @@ wybranym na stronie bramki / w HA. Projekt może w swoim `CLAUDE.md` ogłosić *
 co zrobiłem”, a nie zalew parametrów; bramka czytała dotąd całą odpowiedź modelu, z PR-ami
 i ścieżkami.
 
+**7.7 Mail wychodzi tylko na wyraźną prośbę.** Wysyłka przez skill `mail`
+(`project_integration/tools/send_mail.py`, Gmail): do siebie (`--to self`) od razu; do kogokolwiek
+innego **najpierw adresat, temat i treść do akceptacji**, dopiero po „tak" `--potwierdzone`. Hasło
+tylko w Menedżerze poświadczeń Windows (`--set-password` w zwykłej konsoli) — nigdy w pliku, repo
+ani w rozmowie; limit dzienny, załączniki tylko z katalogu projektu. *Dlaczego:* decyzja
+użytkownika 2026-10-11 („chcę móc wysłać maila z okien"); mail do osoby trzeciej jest
+nieodwracalny i publikuje treść poza nasze systemy.
+
 ---
 
 ## 8. RTK (token-optimised CLI)
@@ -405,6 +413,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.14 | 2026-10-11 | Regula **7.7 „mail wychodzi tylko na wyrazna prosbe"**: skill `mail`, do siebie od razu, do innych po akceptacji (`--potwierdzone`), haslo w Menedzerze poswiadczen Windows. *Skad:* decyzja uzytkownika -- wysylka maila z okien projektow. |
 | 1.13 | 2026-10-11 | Regula **7.6 „polecenie glosowe dostaje odpowiedz do ucha"**: prompt z `[glos]` ma linie `Glosowo:` po rozeznaniu i na koniec; czytana jest tylko ona, wybranym glosem; projekt moze oglosic tryb rozmowy. *Skad:* prosba uzytkownika -- przy zleceniu z auta chce uslyszec, co Claude moze zrobic i co zrobil, a bramka czytala cala techniczna odpowiedz. |
 | 1.12 | 2026-10-10 | Regula **2.11 'praca samodzielna agenta konczy sie commitem i pushem'** -- rozszerzenie 2.10 na tryby autonomous (petla profesor-student, Agent worktree, orchestrator, remote tasks). Odsylacz w 2.1 rozszerzony o 2.11. *Skad:* decyzja uzytkownika „jak pracuja samodzielnie to na koniec musza wypychac zmiany, bo druga maszyna musi moc zawsze pobrac najswiezsze repo". |
 | 1.11 | 2026-09-21 | Regula **2.10 'praca skonczona jest praca wypchnieta'** scalona z repo HA do kanonu (decyzja uzytkownika 2026-09-20, podjeta w tamtej sesji). Odsylacz w 2.1 rozszerzony o 2.10. *Skad:* `rules_sync.py --check` pokazal HA jako **zmodyfikowane**, a `--pull` ujawnil, ze oba pliki nosza numer **1.10 z roznymi datami i roznej tresci** -- czyli kanon i repo rozjechaly sie po cichu. Numer wersji nie jest tozsamoscia pliku; tozsamoscia jest tresc, i dlatego `--push` odmawia nadpisania pliku 'zmodyfikowanego'. |
