@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.14 (2026-10-11). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.16 (2026-10-13). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -345,6 +345,11 @@ też wpisać ręcznie, np. w oknie projektu na telefonie) ma **dwie linie `Gloso
 
 Linia `Glosowo:` to **jedno–dwa zdania potoczną polszczyzną, jak człowiek do człowieka**: bez
 liczb (chyba że jedna jest sednem), ścieżek, nazw plików, komend, skrótów commitów, gałęzi.
+**Z polskimi diakrytykami (ą, ę, ć, ł, ś, ż, ź, ó, ń)** — bez wyjątku. Reguła 4.1 (ASCII) dotyczy
+źródeł kompilowanych i komentarzy kodu, a nie tekstu czytanego głośno przez TTS: `Glosowo:
+rosnące archiwum zdjęć`, nigdy `Glosowo: rosnace archiwum zdjec`. *Dlaczego:* syntezator mówi
+to, co widzi — „zdjec" wychodzi jako „zjetc" zamiast „zdjęć"; słownik fonetyczny w bramce łata
+tylko znane formy, a Claude ma ich generować nieskończenie wiele.
 Reszta odpowiedzi zostaje techniczna, jak zawsze — **czytana jest tylko linia `Glosowo:`**
 (bramka bierze ostatnią; dyspozytor okien mówi każdą nową od razu, gdy się pojawi), głosem
 wybranym na stronie bramki / w HA. Projekt może w swoim `CLAUDE.md` ogłosić **tryb rozmowy**
@@ -360,6 +365,15 @@ tylko w Menedżerze poświadczeń Windows (`--set-password` w zwykłej konsoli) 
 ani w rozmowie; limit dzienny, załączniki tylko z katalogu projektu. *Dlaczego:* decyzja
 użytkownika 2026-10-11 („chcę móc wysłać maila z okien"); mail do osoby trzeciej jest
 nieodwracalny i publikuje treść poza nasze systemy.
+
+**7.8 Zadanie dłuższe niż 2 minuty dostaje stempel czasowy.** Pierwsza linia odpowiedzi: `[HH:MM]`
+(sam czas startu). Ostatnia linia odpowiedzi: `[HH:MM→HH:MM · Nm]` (start→koniec + czas trwania;
+`1h 05m` dla dłuższych). Krótsze odpowiedzi (rozmowa, pytanie, drobna poprawka) stempla nie
+potrzebują — dodawałby więcej szumu niż wartości. *Dlaczego:* prośba użytkownika 2026-10-13 —
+ma otwarte okna z Claude'em pracującym w tle i bez stempli nie wie, ile dane okno było bezczynne
+między zadaniami ani ile konkretne zadanie trwało. Monitor liczy czas po stronie serwera (zegar
+zadania w `heartbeat.py`, reguła 2.9), ale to widać na telefonie, nie w oknie. Format wybrany,
+by był grepowalny i nie zajmował miejsca.
 
 ---
 
@@ -413,6 +427,8 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.16 | 2026-10-13 | Regula **7.8 „zadanie dluzsze niz 2 min dostaje stempel czasowy"**: pierwsza linia `[HH:MM]`, ostatnia `[HH:MM→HH:MM · Nm]`. *Skad:* prosba uzytkownika — ma otwarte okna z Claude'em pracujacym w tle i bez stempli nie wie ile okno bylo bezczynne miedzy zadaniami ani ile samo zadanie trwalo. Monitor liczy czas po stronie serwera (regula 2.9), ale to widac na telefonie, nie w oknie. |
+| 1.15 | 2026-10-13 | Regula **7.6 doprecyzowana**: linia `Glosowo:` MUSI miec polskie diakrytyki (reguly 4.1 ASCII dotyczy tylko zrodel kompilowanych i komentarzy kodu, nie tekstu dla TTS). *Skad:* okno projektu Jacek na telefonie — Claude pisal „Glosowo: rosnace archiwum zdjec" i syntezator mowil „zjetc"; slownik fonetyczny lata tylko znane formy, a Claude ma ich generowac nieskonczonosc. Rozszerzono tez `tools/phonetize/pl.json` o ~80 wyrazow z log sesji (sciezek, wsrod, mnogosci, montaz, chrzaszcz, powylamywanymi, nalezy, czlowiek, przegladu, kadrow, calkiem, rzadu, ujecia, calosc, wysylania, rosnace, wyciaga, rece, slowo), ale to tylko druga linia obrony. |
 | 1.14 | 2026-10-11 | Regula **7.7 „mail wychodzi tylko na wyrazna prosbe"**: skill `mail`, do siebie od razu, do innych po akceptacji (`--potwierdzone`), haslo w Menedzerze poswiadczen Windows. *Skad:* decyzja uzytkownika -- wysylka maila z okien projektow. |
 | 1.13 | 2026-10-11 | Regula **7.6 „polecenie glosowe dostaje odpowiedz do ucha"**: prompt z `[glos]` ma linie `Glosowo:` po rozeznaniu i na koniec; czytana jest tylko ona, wybranym glosem; projekt moze oglosic tryb rozmowy. *Skad:* prosba uzytkownika -- przy zleceniu z auta chce uslyszec, co Claude moze zrobic i co zrobil, a bramka czytala cala techniczna odpowiedz. |
 | 1.12 | 2026-10-10 | Regula **2.11 'praca samodzielna agenta konczy sie commitem i pushem'** -- rozszerzenie 2.10 na tryby autonomous (petla profesor-student, Agent worktree, orchestrator, remote tasks). Odsylacz w 2.1 rozszerzony o 2.11. *Skad:* decyzja uzytkownika „jak pracuja samodzielnie to na koniec musza wypychac zmiany, bo druga maszyna musi moc zawsze pobrac najswiezsze repo". |
