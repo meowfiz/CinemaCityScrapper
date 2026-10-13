@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.16 (2026-10-13). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.17 (2026-10-13). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -168,6 +168,21 @@ koniec muszą wypychać zmiany, bo druga maszyna musi móc zawsze pobrać najśw
 repo". Reguły 2.8 i 2.9 łapią odpowiednio koniec sesji i zadanie >= 10 min, a 2.10
 łapie Claude kończącego zadanie w rozmowie; żadna z nich nie opisuje jawnie
 agenta autonomous, który może skończyć pracę poza rozmową i bez hooka sesji.
+
+**2.12 `start` odtwarza na maszynie wszystkie repozytoria — także nowe.** `tools/ready.py --apply`
+(skill `start`) sprawdza i naprawia trzy rzeczy, nie tylko repo zbiorcze: (1) **nowe repo** —
+repo właściciela na GitHubie z `ZASADY_PRACY.md` w korzeniu, którego nie ma w `tools/repos.txt`,
+zostaje zarejestrowane (`new_project.register`: lista, mapa repo, paczka, przełącznik wykonywania,
+aliasy głosowe, dodatek HA, panele), a commit **samych zmienionych plików huba** idzie od razu
+na origin; (2) **brak klonu** — każdy projekt z listy bez klonu na tej maszynie jest klonowany obok
+huba (z kodem wyjścia czytanym wprost i czystym statusem po klonie, jak w 2.7; powyżej 2 GB tylko
+raport); (3) **klon za origin** — czyste drzewo (pliki nieśledzone się nie liczą) dostaje
+`pull --ff-only`; nieśledzony plik identyczny bajtowo z wersją z origin, który blokuje
+fast-forward, jest usuwany. Rozjazd i zmiany w drzewie zostają człowiekowi (2.3). Kto zakłada
+repo ręcznie, a nie przez `new_project.py`, i tak zostanie wyłapany przy najbliższym `start`.
+*Dlaczego:* 2026-10-13 `sasagiri_book` założone ręcznie w pracy (paczka wypchnięta, wpis tylko
+w tamtym `monitor_repos.env`) było niewidoczne w domu, 4 projekty z listy nie miały tu klonu,
+a 16 z 19 klonów było za origin (RibnXtr2026 o 43 commity) — bo `start` podciągał tylko hub.
 
 ---
 
@@ -405,7 +420,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `project_files/python/` (lub `src/`) | kod analityczny | — |
 | `project_files/python/tests/` | testy nazywające porażki | CI / meta-projekt (`pytest -q`) |
 | `project_files/run_files/` | artefakty i logi, **nie w repo** | paczka przenoszenia |
-| `tools/ready.py`, `tools/statusline.py` | **konfiguracja MASZYNY**, nie repozytorium: `ready.py --apply` doprowadza maszyne do stanu z repo (klon, pack, przelacznik wykonywania, uslugi tla, swiezosc bramki glosowej, wersja dodatku HA, pasek statusu) i wypisuje w punktach, czego nie umial zrobic sam; `statusline.py --install` wpina pasek zuzycia kontekstu i limitow w `~/.claude/settings.json`, czyli **raz na maszyne, dla wszystkich projektow naraz**. Dlatego tego NIE MA w packu -- pack instaluje pliki DO repozytoriow, a to sa ustawienia maszyny. Skill `start` wola `ready.py --apply`, wiec nowa maszyna nie wymaga pamietania krokow | czlowiek przy nowej maszynie, Claude Code |
+| `tools/ready.py`, `tools/statusline.py` | **konfiguracja MASZYNY**, nie repozytorium: `ready.py --apply` doprowadza maszyne do stanu z repo (klon, nowe repo i klony projektow -- regula 2.12, pack, przelacznik wykonywania, uslugi tla, swiezosc bramki glosowej, wersja dodatku HA, pasek statusu) i wypisuje w punktach, czego nie umial zrobic sam; `statusline.py --install` wpina pasek zuzycia kontekstu i limitow w `~/.claude/settings.json`, czyli **raz na maszyne, dla wszystkich projektow naraz**. Dlatego tego NIE MA w packu -- pack instaluje pliki DO repozytoriow, a to sa ustawienia maszyny. Skill `start` wola `ready.py --apply`, wiec nowa maszyna nie wymaga pamietania krokow | czlowiek przy nowej maszynie, Claude Code |
 | `*_provenance.py`, `*_transfer_package.py` | prowenienecja, paczka | — |
 
 Meta-projekt może więc dla każdego repo odczytać: **stan** (`start.md`), **oś czasu**
@@ -427,6 +442,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.17 | 2026-10-13 | Regula **2.12 „start odtwarza na maszynie wszystkie repozytoria"**: `ready.py` rejestruje repo z ZASADAMI spoza `repos.txt`, klonuje brakujace projekty i robi fast-forward czystych klonow. *Skad:* `sasagiri_book` zalozone recznie w pracy bylo niewidoczne w domu; 4 projekty bez klonu, 16/19 klonow za origin, bo `start` podciagal tylko hub. |
 | 1.16 | 2026-10-13 | Regula **7.8 „zadanie dluzsze niz 2 min dostaje stempel czasowy"**: pierwsza linia `[HH:MM]`, ostatnia `[HH:MM→HH:MM · Nm]`. *Skad:* prosba uzytkownika — ma otwarte okna z Claude'em pracujacym w tle i bez stempli nie wie ile okno bylo bezczynne miedzy zadaniami ani ile samo zadanie trwalo. Monitor liczy czas po stronie serwera (regula 2.9), ale to widac na telefonie, nie w oknie. |
 | 1.15 | 2026-10-13 | Regula **7.6 doprecyzowana**: linia `Glosowo:` MUSI miec polskie diakrytyki (reguly 4.1 ASCII dotyczy tylko zrodel kompilowanych i komentarzy kodu, nie tekstu dla TTS). *Skad:* okno projektu Jacek na telefonie — Claude pisal „Glosowo: rosnace archiwum zdjec" i syntezator mowil „zjetc"; slownik fonetyczny lata tylko znane formy, a Claude ma ich generowac nieskonczonosc. Rozszerzono tez `tools/phonetize/pl.json` o ~80 wyrazow z log sesji (sciezek, wsrod, mnogosci, montaz, chrzaszcz, powylamywanymi, nalezy, czlowiek, przegladu, kadrow, calkiem, rzadu, ujecia, calosc, wysylania, rosnace, wyciaga, rece, slowo), ale to tylko druga linia obrony. |
 | 1.14 | 2026-10-11 | Regula **7.7 „mail wychodzi tylko na wyrazna prosbe"**: skill `mail`, do siebie od razu, do innych po akceptacji (`--potwierdzone`), haslo w Menedzerze poswiadczen Windows. *Skad:* decyzja uzytkownika -- wysylka maila z okien projektow. |
