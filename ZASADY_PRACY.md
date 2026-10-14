@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.17 (2026-10-13). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.18 (2026-10-14). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -358,17 +358,30 @@ też wpisać ręcznie, np. w oknie projektu na telefonie) ma **dwie linie `Gloso
    zrobię i dlaczego; przy pytaniu, na które odpowiedź jest od razu, wystarczy jedna linia;
 2. **na koniec** (krótkie zadania) — co wyszło i co użytkownik może teraz zrobić.
 
+**Pytanie głosowe dostaje bezpośrednią odpowiedź.** Gdy prompt z `[glos]` jest pytaniem (a nie
+zleceniem), linia `Glosowo:` zawiera **odpowiedź na pytanie** — nie opis procesu, nie
+potwierdzenie, że pytanie usłyszano. Krótko, po ludzku, jak rozmowa. „Jak idzie projekt?” →
+`Glosowo: Idzie dobrze, właśnie skończyliśmy obsługę dźwięku.` Bez technikaliów, bez nazw
+plików, bez liczb, chyba że liczba jest sednem pytania.
+
 Linia `Glosowo:` to **jedno–dwa zdania potoczną polszczyzną, jak człowiek do człowieka**: bez
-liczb (chyba że jedna jest sednem), ścieżek, nazw plików, komend, skrótów commitów, gałęzi.
+ścieżek, nazw plików, komend, skrótów commitów, gałęzi.
 **Z polskimi diakrytykami (ą, ę, ć, ł, ś, ż, ź, ó, ń)** — bez wyjątku. Reguła 4.1 (ASCII) dotyczy
 źródeł kompilowanych i komentarzy kodu, a nie tekstu czytanego głośno przez TTS: `Glosowo:
 rosnące archiwum zdjęć`, nigdy `Glosowo: rosnace archiwum zdjec`. *Dlaczego:* syntezator mówi
-to, co widzi — „zdjec" wychodzi jako „zjetc" zamiast „zdjęć"; słownik fonetyczny w bramce łata
+to, co widzi — „zdjec” wychodzi jako „zjetc” zamiast „zdjęć”; słownik fonetyczny w bramce łata
 tylko znane formy, a Claude ma ich generować nieskończenie wiele.
 Reszta odpowiedzi zostaje techniczna, jak zawsze — **czytana jest tylko linia `Glosowo:`**
 (bramka bierze ostatnią; dyspozytor okien mówi każdą nową od razu, gdy się pojawi), głosem
 wybranym na stronie bramki / w HA. Projekt może w swoim `CLAUDE.md` ogłosić **tryb rozmowy**
 (np. nauka języka): wtedy cała odpowiedź jest do odsłuchu i znacznik nie jest potrzebny.
+
+**Routing głosowy między urządzeniami (machine-tag).** Jeśli prompt ma tag `[glos-NAME]`
+(dokłada go strona okna w przeglądarce, `NAME` to identyfikator urządzenia), odpowiedź ma
+postać `Glosowo-NAME:` z tym samym identyfikatorem. Przeglądarka odtwarza tylko linie
+z własnym `NAME` — inne urządzenia ich nie słyszą. Nietagowane `Glosowo:` gra na wszystkich.
+*Dlaczego:* bez tagu PC grał odpowiedzi wysłane z telefonu i odwrotnie (broadcast 2026-10-14).
+
 *Dlaczego:* prośba użytkownika 2026-10-11 — przy zleceniu z auta chce usłyszeć „co mogę zrobić /
 co zrobiłem”, a nie zalew parametrów; bramka czytała dotąd całą odpowiedź modelu, z PR-ami
 i ścieżkami.
@@ -442,6 +455,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.18 | 2026-10-14 | Regula **7.6 rozszerzona o dwa punkty**: (1) **pytanie glosowe dostaje bezposrednia odpowiedz** — `Glosowo:` mowi wprost, co jest odpowiedzia, nie opisuje procesu; krotko i po ludzku, bez technikaliow; (2) **machine-tag routing** — `[glos-NAME]` w prompcie daje `Glosowo-NAME:` w odpowiedzi; tylko urzadzenie z pasujacym NAME to odtwarza. *Skad:* prosba uzytkownika 2026-10-14 — brak panowania nad tym, kto slyszy co; PC gral odpowiedzi pytane z telefonu (broadcast bez tagu). |
 | 1.17 | 2026-10-13 | Regula **2.12 „start odtwarza na maszynie wszystkie repozytoria"**: `ready.py` rejestruje repo z ZASADAMI spoza `repos.txt`, klonuje brakujace projekty i robi fast-forward czystych klonow. *Skad:* `sasagiri_book` zalozone recznie w pracy bylo niewidoczne w domu; 4 projekty bez klonu, 16/19 klonow za origin, bo `start` podciagal tylko hub. |
 | 1.16 | 2026-10-13 | Regula **7.8 „zadanie dluzsze niz 2 min dostaje stempel czasowy"**: pierwsza linia `[HH:MM]`, ostatnia `[HH:MM→HH:MM · Nm]`. *Skad:* prosba uzytkownika — ma otwarte okna z Claude'em pracujacym w tle i bez stempli nie wie ile okno bylo bezczynne miedzy zadaniami ani ile samo zadanie trwalo. Monitor liczy czas po stronie serwera (regula 2.9), ale to widac na telefonie, nie w oknie. |
 | 1.15 | 2026-10-13 | Regula **7.6 doprecyzowana**: linia `Glosowo:` MUSI miec polskie diakrytyki (reguly 4.1 ASCII dotyczy tylko zrodel kompilowanych i komentarzy kodu, nie tekstu dla TTS). *Skad:* okno projektu Jacek na telefonie — Claude pisal „Glosowo: rosnace archiwum zdjec" i syntezator mowil „zjetc"; slownik fonetyczny lata tylko znane formy, a Claude ma ich generowac nieskonczonosc. Rozszerzono tez `tools/phonetize/pl.json` o ~80 wyrazow z log sesji (sciezek, wsrod, mnogosci, montaz, chrzaszcz, powylamywanymi, nalezy, czlowiek, przegladu, kadrow, calkiem, rzadu, ujecia, calosc, wysylania, rosnace, wyciaga, rece, slowo), ale to tylko druga linia obrony. |
