@@ -1,4 +1,4 @@
-# STYL PISANIA — skrót (v1.1)
+# STYL PISANIA — skrót (v1.2)
 
 Pełna wersja z przykładami, listami słów i źródłami: `notes/STYL_PISANIA_PELNY.md`. Czytaj ją przy tekście
 dłuższym niż kilka zdań (README, raport, publikacja, opis PR, mail).
@@ -19,7 +19,8 @@ dłuższym niż kilka zdań (README, raport, publikacja, opis PR, mail).
    cytuj tylko zweryfikowane, inaczej „DO WERYFIKACJI”.
 9. Listy słów to lista kontrolna, nie zakaz: nie zamieniaj słowa na synonim dla samej flagi. Liczy się skupisko
    (≥3 objawy w akapicie), nie pojedyncze słowo.
-10. Języki: punkty 1–8 dotyczą każdego języka. Listy słów są językowe: EN zmierzona, PL to obserwacja własna,
-    inne języki bez listy (tylko struktury). Nie tłumacz listy angielskiej słowo w słowo.
+10. Języki: punkty 1–8 dotyczą każdego języka. Listy słów są językowe i historyczne: EN z literatury (modele 2023–24),
+    PL obserwacja własna; nasz pomiar (2026-10, Haiku 5.5) nie potwierdził żadnej flagi, więc słowa z list nie są
+    dowodem autorstwa. Inne języki: tylko struktury. Nie tłumacz listy angielskiej słowo w słowo.
 
 Nie służy do omijania detektorów ani nie zwalnia z ujawnienia użycia AI tam, gdzie jest wymagane.
