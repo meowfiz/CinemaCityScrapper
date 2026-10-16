@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.18 (2026-10-14). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.19 (2026-10-16). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -248,6 +248,18 @@ progów, orientacji.
 
 **4.11 Nieodwracalna naprawa danych ma warunek akceptacji, nie tylko heurystykę.** Skrypt, który przepisuje zapisane dane (naprawa kodowania, migracja, czyszczenie), musi mieć jawny warunek „to na pewno było zepsute" i zostawiać nietknięte wszystko, co go nie spełnia. *Dlaczego:* przy odwracaniu mojibake para `Ćż` koduje się na poprawny UTF-8 innego znaku — bez listy dopuszczalnych zakresów naprawa zepsułaby poprawny tekst, i to nieodwracalnie.
 
+
+**4.12 Teksty piszemy wg `notes/STYL_PISANIA.md`.** Notatki, raporty, README, opisy PR, publikacje, maile
+i odpowiedzi do ludzi: konkretnie (nazwa, liczba, źródło, decyzja), bez wzorców „pisania AI” (nadęta waga,
+ogólnikowe atrybucje, imiesłowowe doklejki, słownik typu *delve/kluczowy*, reguła trzech, nadmiar
+formatowania, zdania do użytkownika w treści). Pełna lista i test przed oddaniem w pliku; liczy się
+skupisko objawów, nie pojedyncze słowo. Plik jedzie z paczką (`install_pack.py`) do każdego repo,
+także nowego (`new_project.py`).
+@notes/STYL_PISANIA.md
+*Dlaczego:* polecenie użytkownika 2026-10-16 — teksty mają być wolne od przypadłości stylu AI, bo
+puste zdania ukrywają brak treści, a recenzent je widzi (ZASADY 5.14). Wzorce opisane na podstawie
+Wikipedii („Signs of AI writing”) i dwóch prac recenzowanych (Kobak i in. 2025, Juzek i Ward 2025).
+
 ---
 
 ## 5. Nauka i pomiar
@@ -430,6 +442,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `.claude/settings.json` | hooki Claude Code (`SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`, `SessionEnd`) wywołujące heartbeat; **scalane sumą** z ustawieniami projektu | Claude Code |
 | `monitor/services.py` | jeden punkt wejścia do usług tła tej maszyny (`--start` podnosi brakujące, tabela mówi, co działa): worker pytań, worker zleceń, bramka głosowa. Wywoływany przez hook `SessionStart` i przez wpis w Autostarcie (`tools/install_autostart.py`). Stan jest **pomiarem** — świeżość zamka, otwarty port — nie deklaracją | człowiek („czy mogę pracować zdalnie"), Claude Code |
 | `monitor/heartbeat.py`, `monitor/taskparse.py` | heartbeat do serwera monitora (tylko stdlib, ASCII; adres i token w `~/.claude/monitor.env`, nigdy w repo); `--event label --label "..."` nadaje nazwę bieżącemu zadaniu (reguła 1.5); parser `tasks.md` wspólny z `gen_openspec_status.py`; zegar zadania (prompt → stop) odpala `auto_sync.py` po 10 min (reguła 2.9) | meta-projekt (stan „pracuje / czeka / skończył" na żywo, czas i nazwa zadania) |
+| `notes/STYL_PISANIA.md` | zasady stylu pisania (anti-AI-style), identyczne wszedzie; wciagane przez ZASADY 4.12 | Claude |
 | `project_files/python/` (lub `src/`) | kod analityczny | — |
 | `project_files/python/tests/` | testy nazywające porażki | CI / meta-projekt (`pytest -q`) |
 | `project_files/run_files/` | artefakty i logi, **nie w repo** | paczka przenoszenia |
@@ -455,6 +468,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.19 | 2026-10-16 | Regula **4.12 „teksty piszemy wg `notes/STYL_PISANIA.md`”** (zasady anti-AI-style) + import `@notes/STYL_PISANIA.md`; plik w paczce (`install_pack.py`, `CODE_FILES`). *Skad:* polecenie uzytkownika — zebrac wzorce stylu AI z Wikipedii i 2-3 najnowszych zrodel, sformulowac zasady i dolaczac je w kazdym projekcie, takze nowym. |
 | 1.18 | 2026-10-14 | Regula **7.6 rozszerzona o dwa punkty**: (1) **pytanie glosowe dostaje bezposrednia odpowiedz** — `Glosowo:` mowi wprost, co jest odpowiedzia, nie opisuje procesu; krotko i po ludzku, bez technikaliow; (2) **machine-tag routing** — `[glos-NAME]` w prompcie daje `Glosowo-NAME:` w odpowiedzi; tylko urzadzenie z pasujacym NAME to odtwarza. *Skad:* prosba uzytkownika 2026-10-14 — brak panowania nad tym, kto slyszy co; PC gral odpowiedzi pytane z telefonu (broadcast bez tagu). |
 | 1.17 | 2026-10-13 | Regula **2.12 „start odtwarza na maszynie wszystkie repozytoria"**: `ready.py` rejestruje repo z ZASADAMI spoza `repos.txt`, klonuje brakujace projekty i robi fast-forward czystych klonow. *Skad:* `sasagiri_book` zalozone recznie w pracy bylo niewidoczne w domu; 4 projekty bez klonu, 16/19 klonow za origin, bo `start` podciagal tylko hub. |
 | 1.16 | 2026-10-13 | Regula **7.8 „zadanie dluzsze niz 2 min dostaje stempel czasowy"**: pierwsza linia `[HH:MM]`, ostatnia `[HH:MM→HH:MM · Nm]`. *Skad:* prosba uzytkownika — ma otwarte okna z Claude'em pracujacym w tle i bez stempli nie wie ile okno bylo bezczynne miedzy zadaniami ani ile samo zadanie trwalo. Monitor liczy czas po stronie serwera (regula 2.9), ale to widac na telefonie, nie w oknie. |
