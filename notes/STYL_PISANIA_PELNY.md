@@ -1,6 +1,6 @@
 # STYL PISANIA — pełna wersja
 
-Wersja 1.1 (2026-10-16). Skrót importowany do każdej sesji: `notes/STYL_PISANIA.md` (do 3 KB, pilnuje tego test).
+Wersja 1.2 (2026-10-16). Skrót importowany do każdej sesji: `notes/STYL_PISANIA.md` (do 3 KB, pilnuje tego test).
 Ten plik czytaj, gdy piszesz tekst dłuższy niż kilka zdań: README, raport, publikacja, opis PR, mail.
 
 **Zasada nadrzędna.** Każde zdanie powinno wnosić konkretną informację, przykład, ograniczenie, źródło albo
@@ -24,8 +24,9 @@ utrudnia wykrycie prawdziwych kłopotów (źródła, trafność).
 **Język.** Wzorce pochodzą z literatury angielskiej (angielska Wikipedia, abstrakty PubMed). Co z tego przenosi się na inne języki:
 - *Struktura, treść, format, uczciwość* (sekcje 1, 3–6): mechanizm nie zależy od języka (pusta waga, źródło bez nazwy,
   doklejki, resztki po chatbocie). Zasada obowiązuje w każdym języku, ale dowody są angielskie.
-- *Słownictwo* (sekcja 2): zależy od języka. **EN** zmierzone; **PL** to moja obserwacja do zmierzenia; **inne języki**
-  (np. japoński) — brak danych, listy nie stosuj, tylko struktury. Nie tłumacz listy angielskiej słowo w słowo:
+- *Słownictwo* (sekcja 2): zależy od języka. **EN** pochodzi z literatury (modele z lat 2023–24); **PL** to moja obserwacja;
+  **własny pomiar z 2026-10-16 nie potwierdził żadnej flagi ani w PL, ani w EN** (sekcja 2); **inne języki** (np. japoński)
+  — brak danych, listy nie stosuj, tylko struktury. Nie tłumacz listy angielskiej słowo w słowo:
   „delve” → „zagłębiać się” niczego nie dowodzi.
 - *Typografia*: sygnały zależą od języka. Cudzysłowy „…” są w polskim normą, nie objawem; pauza i krzywe apostrofy
   to wskazówki angielskie.
@@ -53,13 +54,22 @@ utrudnia wykrycie prawdziwych kłopotów (źródła, trafność).
 Lista jest **listą kontrolną, nie zakazem**. Nie zastępuj słowa synonimem, żeby uniknąć flagi; jeśli słowo jest
 w zdaniu najtrafniejsze, zostaw je. Flaga ma wywołać pytanie „czy da się konkretniej?”.
 
-**EN (zmierzone).** Nadreprezentowane po LLM: *delve(s/ing), showcase/showcasing, underscore(s), intricate/intricacies,
+**Nasz pomiar (2026-10-16, `notes/style_flags_wynik.md`).** Haiku 5.5 (alias `haiku`), akapit encyklopedyczny kontra akapit z Wikipedii
+sprzed 2022 r., 150 haseł na język, test Fishera z poprawką Holma, prerejestrowany. **Żadna z 26 flag PL i 35 flag EN nie rozdzieliła
+obu zbiorów.** Przyczyna zmierzona: 15 z 26 flag PL i 24 z 35 flag EN nie wystąpiło ani razu w żadnym zbiorze, a suma trafień
+wszystkich flag wyniosła 41 (model) wobec 20 (człowiek) w PL i 13 wobec 8 w EN. Najbliżej było „stanowi” w PL (14/146 wobec 6/150,
+surowe p = 0,045, po korekcie nie jest wynikiem). Moc: żeby flaga rzadka przeszła, musiałaby wystąpić u ≥ 9–10 akapitów modelu
+i u zera ludzkich. **Wniosek:** listy są **historyczne** (modele sprzed 2025 r.) i nie są dowodem autorstwa dla bieżących modeli; nie
+wolno wnioskować o autorstwie z obecności ani nieobecności tych słów. Zasady treści i struktury (sekcje 1, 3–6) nie były tym pomiarem
+objęte i nie zostały ani potwierdzone, ani obalone.
+
+**EN (z literatury, niepotwierdzone dla Haiku 5.5).** Nadreprezentowane po LLM: *delve(s/ing), showcase/showcasing, underscore(s), intricate/intricacies,
 boasts, garnered, comprehending, realm, groundbreaking, advancements, aligns, emphasizing, surpassing* (Juzek i Ward 2025);
 *potential, findings, critical* w abstraktach 2024 (Kobak i in. 2025). Wikipedia dodaje: *pivotal, crucial, testament,
 tapestry, enduring, vibrant, fostering, valuable, additionally* (początek zdania); nowsze modele: *leverage, multifaceted,
 prioritize*. Listy zależą od generacji modelu i się zmieniają.
 
-**PL (obserwacja własna, NIEZWERYFIKOWANA).** „kluczowy”, „istotny”, „warto zauważyć”, „w dzisiejszych czasach”,
+**PL (obserwacja własna; pomiar 2026-10-16 nie potwierdził żadnej flagi).** „kluczowy”, „istotny”, „warto zauważyć”, „w dzisiejszych czasach”,
 „w świecie…”, „podkreśla znaczenie”, „rzuca światło na”, „otwiera nowe możliwości”, „solidny”, „holistyczny”,
 „krajobraz” (przenośnia), „Co więcej”/„Dodatkowo”/„Podsumowując” otwierające zdanie.
 
@@ -126,11 +136,13 @@ Nie przesadzaj w drugą stronę: bez celowych literówek, bez dzielenia zdań �
 - Juzek T. S., Ward Z. B., „Why Does ChatGPT ‘Delve’ So Much? Exploring the Sources of Lexical Overrepresentation in Large
   Language Models”, COLING 2025 (arXiv:2412.11385; czytana v1, grudzień 2024). Strony i DOI proceedings DO WERYFIKACJI.
   Wniosek: przyczyna najpewniej w RLHF, niepotwierdzona. Materiał angielski.
+- Własny pomiar: `notes/style_flags_wynik.md` (preregistracja: `openspec/changes/style-flags-measurement/tasks.md`; dane poza repo, odciski SHA-256 w raporcie).
 - Nieużyte: doniesienie z bloga o podwojeniu częstości pauzy w abstraktach 2021–2025 (nie znalazłem oryginału).
 
 ## 10. Zmiany
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.2 | 2026-10-16 | Wynik własnego pomiaru flag (PL, EN; Haiku 5.5 vs Wikipedia sprzed 2022): negatyw w obu językach; listy oznaczone jako historyczne, bez wniosków o autorstwie. *Skąd:* zmiana OpenSpec `style-flags-measurement`. |
 | 1.1 | 2026-10-16 | Zasada nadrzędna bez wymuszania nazwy/liczby; „proste czasowniki” zamiast „unikaj jest”; 1.8 „nie udawaj wykonania”; gatunki i język (sekcja 0); lista słów jako lista kontrolna; skrót importowany + pełna wersja na żądanie. *Skąd:* uwagi użytkownika po v1.0 i pytanie o różne języki. |
 | 1.0 | 2026-10-16 | Pierwsza wersja z polecenia użytkownika; lokalnego skilla anti-AI nie było. |
