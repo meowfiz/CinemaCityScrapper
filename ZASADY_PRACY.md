@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.20 (2026-10-16). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.21 (2026-10-17). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -417,6 +417,13 @@ między zadaniami ani ile konkretne zadanie trwało. Monitor liczy czas po stron
 zadania w `heartbeat.py`, reguła 2.9), ale to widać na telefonie, nie w oknie. Format wybrany,
 by był grepowalny i nie zajmował miejsca.
 
+**7.9 Odpowiedź na pytanie kończy się sekcją w punktach.** Każda odpowiedź na pytanie (nie zlecenie)
+ma na końcu blok: pełne zdania, prosty język, liczby tam gdzie są istotne, zero bełkotu i technikaliów
+niezwiązanych z pytaniem. Punkty zawierają maksymalnie zwartą informację — nie opis procesu dochodzenia,
+nie powtórkę tego, co widać w logach. Jedno zdanie = jeden fakt lub decyzja. *Dlaczego:* prośba
+użytkownika 2026-10-17 — po serii wywołań narzędzi odpowiedź na proste pytanie o stan maszyn
+była zakopana za wydrukami API.
+
 ---
 
 ## 8. RTK (token-optimised CLI)
@@ -470,6 +477,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.21 | 2026-10-17 | Regula **7.9 „odpowiedz na pytanie konczy sie sekcja w punktach"**: pelne zdania, prosty jezyk, liczby gdzie istotne, zero belkotu i technikaliow niezwiazanych z pytaniem; jedno zdanie = jeden fakt lub decyzja. *Skad:* prosba uzytkownika 2026-10-17 — po wywolaniach API odpowiedz na proste pytanie o stan maszyn byla zakopana za wydrukami. |
 | 1.20 | 2026-10-16 | Regula **4.12 doprecyzowana**: importowany jest skrot `STYL_PISANIA.md` (<= 3 KB, test), pelna wersja `STYL_PISANIA_PELNY.md` na zadanie; zasada "zasady piszemy zwiezle". *Skad:* uwaga uzytkownika — dbamy o kompaktowe zasady zawsze (plik wciagany do kazdej sesji w 23 repo kosztuje tokeny). |
 | 1.19 | 2026-10-16 | Regula **4.12 „teksty piszemy wg `notes/STYL_PISANIA.md`”** (zasady anti-AI-style) + import `@notes/STYL_PISANIA.md`; plik w paczce (`install_pack.py`, `CODE_FILES`). *Skad:* polecenie uzytkownika — zebrac wzorce stylu AI z Wikipedii i 2-3 najnowszych zrodel, sformulowac zasady i dolaczac je w kazdym projekcie, takze nowym. |
 | 1.18 | 2026-10-14 | Regula **7.6 rozszerzona o dwa punkty**: (1) **pytanie glosowe dostaje bezposrednia odpowiedz** — `Glosowo:` mowi wprost, co jest odpowiedzia, nie opisuje procesu; krotko i po ludzku, bez technikaliow; (2) **machine-tag routing** — `[glos-NAME]` w prompcie daje `Glosowo-NAME:` w odpowiedzi; tylko urzadzenie z pasujacym NAME to odtwarza. *Skad:* prosba uzytkownika 2026-10-14 — brak panowania nad tym, kto slyszy co; PC gral odpowiedzi pytane z telefonu (broadcast bez tagu). |
