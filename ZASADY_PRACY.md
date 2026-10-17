@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.21 (2026-10-17). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.22 (2026-10-17). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -455,7 +455,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `project_files/python/` (lub `src/`) | kod analityczny | — |
 | `project_files/python/tests/` | testy nazywające porażki | CI / meta-projekt (`pytest -q`) |
 | `project_files/run_files/` | artefakty i logi, **nie w repo** | paczka przenoszenia |
-| `tools/ready.py`, `tools/statusline.py` | **konfiguracja MASZYNY**, nie repozytorium: `ready.py --apply` doprowadza maszyne do stanu z repo (klon, nowe repo i klony projektow -- regula 2.12, pack, przelacznik wykonywania, uslugi tla, swiezosc bramki glosowej, wersja dodatku HA, pasek statusu) i wypisuje w punktach, czego nie umial zrobic sam; `statusline.py --install` wpina pasek zuzycia kontekstu i limitow w `~/.claude/settings.json`, czyli **raz na maszyne, dla wszystkich projektow naraz**. Dlatego tego NIE MA w packu -- pack instaluje pliki DO repozytoriow, a to sa ustawienia maszyny. Skill `start` wola `ready.py --apply`, wiec nowa maszyna nie wymaga pamietania krokow | czlowiek przy nowej maszynie, Claude Code |
+| `tools/ready.py`, `tools/statusline.py` | **konfiguracja MASZYNY**, nie repozytorium: `ready.py --apply` doprowadza maszyne do stanu z repo (klon, nowe repo i klony projektow -- regula 2.12, pack, przelacznik wykonywania, uslugi tla, swiezosc bramki glosowej, wersja dodatku HA, pasek statusu z modelem sesji -- regula 1.22) i wypisuje w punktach, czego nie umial zrobic sam; `statusline.py --install` wpina pasek zuzycia kontekstu i limitow w `~/.claude/settings.json`, czyli **raz na maszyne, dla wszystkich projektow naraz**. Dlatego tego NIE MA w packu -- pack instaluje pliki DO repozytoriow, a to sa ustawienia maszyny. Skill `start` wola `ready.py --apply`, wiec nowa maszyna nie wymaga pamietania krokow | czlowiek przy nowej maszynie, Claude Code |
 | `*_provenance.py`, `*_transfer_package.py` | prowenienecja, paczka | — |
 
 Meta-projekt może więc dla każdego repo odczytać: **stan** (`start.md`), **oś czasu**
@@ -477,6 +477,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.22 | 2026-10-17 | Sekcja 9, wiersz `tools/statusline.py`: **pasek okna zawsze pokazuje model sesji (`[sonnet]`, `[opus]`...) z payloadu**, a nie z lokalnego pliku economy; `start` (`ready.py`) pilnuje, ze zainstalowany pasek jest bajt w bajt z repo, wiec nowa maszyna dostaje to bez sprawdzania. *Skad:* uzytkownik 2026-10-17 -- okna na drugiej maszynie mialy `[sonnet]`, na tej nie, bo znacznik zalezal od `model_mode.json`, ktory jest per maszyna. |
 | 1.21 | 2026-10-17 | Regula **7.9 „odpowiedz na pytanie konczy sie sekcja w punktach"**: pelne zdania, prosty jezyk, liczby gdzie istotne, zero belkotu i technikaliow niezwiazanych z pytaniem; jedno zdanie = jeden fakt lub decyzja. *Skad:* prosba uzytkownika 2026-10-17 — po wywolaniach API odpowiedz na proste pytanie o stan maszyn byla zakopana za wydrukami. |
 | 1.20 | 2026-10-16 | Regula **4.12 doprecyzowana**: importowany jest skrot `STYL_PISANIA.md` (<= 3 KB, test), pelna wersja `STYL_PISANIA_PELNY.md` na zadanie; zasada "zasady piszemy zwiezle". *Skad:* uwaga uzytkownika — dbamy o kompaktowe zasady zawsze (plik wciagany do kazdej sesji w 23 repo kosztuje tokeny). |
 | 1.19 | 2026-10-16 | Regula **4.12 „teksty piszemy wg `notes/STYL_PISANIA.md`”** (zasady anti-AI-style) + import `@notes/STYL_PISANIA.md`; plik w paczce (`install_pack.py`, `CODE_FILES`). *Skad:* polecenie uzytkownika — zebrac wzorce stylu AI z Wikipedii i 2-3 najnowszych zrodel, sformulowac zasady i dolaczac je w kazdym projekcie, takze nowym. |
