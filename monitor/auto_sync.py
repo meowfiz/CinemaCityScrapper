@@ -233,7 +233,10 @@ def decide(entries: list, last_commit_paths: list, today: str, allow=None, files
         return "push-only", "tree clean, last commit carries the session note", c
     if not need_note:
         return "push-only", "tree clean, G1 off for this repo (.claude/auto_sync.json)", c
-    return "skip", "G1 nothing to commit and last commit has no session note for %s" % today, c
+    # G1 guards NEW commits only. When the tree is already clean, any existing unpushed commit
+    # should be pushed regardless -- blocking the push here is what silently strands commits
+    # made by Claude in rule-2.10 tasks that did not include a session note (e.g. a tools/ fix).
+    return "push-only", "tree clean, pushing existing commits (G1 guards new commits only)", c
 
 
 # ---------------------------------------------------------------------------------------------
