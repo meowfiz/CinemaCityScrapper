@@ -389,9 +389,68 @@ def stop_bridge(cfg, kill=os.kill):
     return "stopped"
 
 
+# -- VCC (serwer glosow prywatnych) ---------------------------------------------
+# VideoContentCreator serwuje prywatne glosy (edyta_gorniak itd.) na 127.0.0.1:8790.
+# Bramka glosowa (voice_gateway.py) i wyoming_tts.py (addon na Pi) wolaja go dla kazdego
+# Glosowo w wybranym glosie, z fallbackiem do Piper gdy nie odpowiada. Padnie VCC -> wszystko
+# fallbackuje do Piper, user slyszy Piper zamiast swojego glosu, "nabu casa milczy" gdy VCC
+# cold start przekroczy BACKOFF_S addon'u.
+# Komenda: `python <VCC_REPO>/project_files/python/vcc.py serve --no-browser`
+VCC_PORT = int(os.environ.get("ASK_VCC_PORT", "8790"))
+VCC_LOCK = os.path.join(tempfile.gettempdir(), "monitor_vcc.lock")
+
+
+def vcc_repo(repo_map=None):
+    """Path to VideoContentCreator clone, or None when this machine does not have it."""
+    mapping = repo_map if repo_map is not None else ask_worker.load_repo_map()
+    repo = mapping.get("VideoContentCreator")
+    return repo if repo and os.path.isdir(repo) else None
+
+
+def vcc_script(repo_map=None):
+    repo = vcc_repo(repo_map)
+    if not repo:
+        return None
+    path = os.path.join(repo, "project_files", "python", "vcc.py")
+    return path if os.path.exists(path) else None
+
+
+def vcc_state(cfg, now=None, probe=None):
+    """Serwer glosow prywatnych na 127.0.0.1:VCC_PORT. Probe tak samo jak bramka -- port otwarty
+    = usluga zyje; stary pid file bez portu = DEAD."""
+    if not vcc_script():
+        return STATE_OFF, "ta maszyna nie ma klonu VideoContentCreator (nie dotyczy)"
+    up = port_open("127.0.0.1", VCC_PORT, connect=probe)
+    return (STATE_UP if up else STATE_DOWN), "glosy prywatne na 127.0.0.1:%d (edyta_gorniak itd.); fallback: Piper" % VCC_PORT
+
+
+def start_vcc(cfg, probe=None):
+    script = vcc_script()
+    if not script:
+        return "skipped"
+    if port_open("127.0.0.1", VCC_PORT, connect=probe):
+        return "running"
+    repo = vcc_repo()
+    proc = spawn_detached([quiet_interpreter(), script, "serve", "--no-browser"], cwd=repo)
+    write_pid(VCC_LOCK, proc.pid)
+    return "spawned"
+
+
+def stop_vcc(cfg, kill=os.kill):
+    stopped = kill_pid(read_pid(VCC_LOCK), kill)
+    if not stopped:
+        stopped = kill_pid(pid_on_port(VCC_PORT), kill)
+    try:
+        os.remove(VCC_LOCK)
+    except OSError:
+        pass
+    return "stopped" if stopped else "not-running"
+
+
 SERVICES = [
     ("ask", "worker pytan", ask_state, start_ask, stop_ask),
     ("execute", "worker zlecen", execute_state, start_execute, stop_execute),
+    ("vcc", "serwer glosow", vcc_state, start_vcc, stop_vcc),
     ("voice", "bramka glosowa", gateway_state, start_gateway, stop_gateway),
     ("dashboards", "dashboardy HA", dashboards_state, start_dashboards, stop_dashboards),
     ("bridge", "okna zdalnie", bridge_state, start_bridge, stop_bridge),
@@ -416,13 +475,18 @@ def table(rows, header=None):
     return "\n".join(out)
 
 
-def start_all(cfg):
-    """Start what is missing. Returns {name: outcome}. Idempotent: running services are left alone."""
-    return {name: start(cfg) for name, _t, _s, start, _stop in SERVICES}
+def start_all(cfg, only=None):
+    """Start what is missing. Returns {name: outcome}. Idempotent: running services are left
+    alone. `only` filters to a single service by name (--restart --only voice to not disturb the
+    bridge, user 2026-10-13: 8 restarts of the voice gateway in one day killed every browser's
+    ttyd WebSocket and the user had to reload each window from HA)."""
+    return {name: start(cfg) for name, _t, _s, start, _stop in SERVICES
+            if only is None or name == only}
 
 
-def stop_all(cfg, kill=os.kill):
-    return {name: stop(cfg, kill) for name, _t, _s, _start, stop in SERVICES}
+def stop_all(cfg, kill=os.kill, only=None):
+    return {name: stop(cfg, kill) for name, _t, _s, _start, stop in SERVICES
+            if only is None or name == only}
 
 
 def wait_until_up(cfg, names, deadline_s=6.0, sleep=time.sleep, probe=None):
@@ -456,7 +520,7 @@ def delegate_to_desktop(argv):
     py = sys.executable.replace("python.exe", "pythonw.exe")
     cmd = '"%s" "%s" %s' % (py if os.path.exists(py) else sys.executable, os.path.abspath(__file__),
                             " ".join(a for a in argv if a != "--json"))
-    run = lambda a: subprocess.run(a, capture_output=True, text=True, **QUIET)  # noqa: E731
+    run = lambda a: subprocess.run(a, capture_output=True, text=True, encoding="utf-8", errors="replace", **QUIET)  # noqa: E731
     created = run(["schtasks", "/Create", "/F", "/TN", DELEGATE_TASK, "/SC", "ONCE", "/ST", "23:59",
                    "/IT", "/TR", cmd])
     started = created.returncode == 0 and run(["schtasks", "/Run", "/TN", DELEGATE_TASK]).returncode == 0
@@ -479,6 +543,8 @@ def main(argv=None):
     ap.add_argument("--start", action="store_true", help="start whatever is missing")
     ap.add_argument("--stop", action="store_true")
     ap.add_argument("--restart", action="store_true", help="stop, then start (after a pack update)")
+    ap.add_argument("--only", metavar="SERVICE", default=None,
+                    help="limit --start/--stop/--restart to one service (voice, bridge, ask, ...)")
     ap.add_argument("--json", action="store_true")
     # A hook runs on every session start and must neither print nor block: it spawns what is
     # missing and returns. Waiting for a lock to appear would put seconds on top of opening a
@@ -492,9 +558,9 @@ def main(argv=None):
     cfg = heartbeat.load_config()
 
     if args.stop or args.restart:
-        stop_all(cfg)
+        stop_all(cfg, only=args.only)
     if args.start or args.restart:
-        outcomes = start_all(cfg)
+        outcomes = start_all(cfg, only=args.only)
         spawned = [n for n, o in outcomes.items() if o == "spawned"]
         if spawned and not args.quiet:
             wait_until_up(cfg, spawned)
