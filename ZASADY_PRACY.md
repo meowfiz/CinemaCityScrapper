@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.22 (2026-10-17). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.23 (2026-10-17). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -176,9 +176,12 @@ zostaje zarejestrowane (`new_project.register`: lista, mapa repo, paczka, przeł
 aliasy głosowe, dodatek HA, panele), a commit **samych zmienionych plików huba** idzie od razu
 na origin; (2) **brak klonu** — każdy projekt z listy bez klonu na tej maszynie jest klonowany obok
 huba (z kodem wyjścia czytanym wprost i czystym statusem po klonie, jak w 2.7; powyżej 2 GB tylko
-raport); (3) **klon za origin** — czyste drzewo (pliki nieśledzone się nie liczą) dostaje
-`pull --ff-only`; nieśledzony plik identyczny bajtowo z wersją z origin, który blokuje
-fast-forward, jest usuwany. Rozjazd i zmiany w drzewie zostają człowiekowi (2.3). Kto zakłada
+raport); (3) **klon za origin** — `start` **zawsze robi pull**: czyste drzewo dostaje
+`pull --ff-only`, drzewo ze zmianami lub z lokalnymi commitami `pull --rebase --autostash`;
+rebase, który się nie stosuje, jest cofany (`rebase --abort`), nigdy `--force` (2.3), a klon zostaje
+człowiekowi z opisem. Nieśledzony plik identyczny bajtowo z wersją z origin, który blokuje
+fast-forward, jest usuwany. *Decyzja użytkownika 2026-10-17:* RibnXtr2026 został 7 commitów za origin,
+bo jeden śledzony plik pomiarowy był zmieniony. Kto zakłada
 repo ręcznie, a nie przez `new_project.py`, i tak zostanie wyłapany przy najbliższym `start`.
 *Dlaczego:* 2026-10-13 `sasagiri_book` założone ręcznie w pracy (paczka wypchnięta, wpis tylko
 w tamtym `monitor_repos.env`) było niewidoczne w domu, 4 projekty z listy nie miały tu klonu,
@@ -477,6 +480,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.23 | 2026-10-17 | Regula **2.12 (3)**: `start` zawsze robi pull -- rebase z autostash przy brudnym drzewie lub lokalnych commitach, cofany przy konflikcie. *Skad:* uzytkownik 2026-10-17: `start` zostawil RibnXtr2026 7 commitow za origin. |
 | 1.22 | 2026-10-17 | Sekcja 9, wiersz `tools/statusline.py`: **pasek okna zawsze pokazuje model sesji (`[sonnet]`, `[opus]`...) z payloadu**, a nie z lokalnego pliku economy; `start` (`ready.py`) pilnuje, ze zainstalowany pasek jest bajt w bajt z repo, wiec nowa maszyna dostaje to bez sprawdzania. *Skad:* uzytkownik 2026-10-17 -- okna na drugiej maszynie mialy `[sonnet]`, na tej nie, bo znacznik zalezal od `model_mode.json`, ktory jest per maszyna. |
 | 1.21 | 2026-10-17 | Regula **7.9 „odpowiedz na pytanie konczy sie sekcja w punktach"**: pelne zdania, prosty jezyk, liczby gdzie istotne, zero belkotu i technikaliow niezwiazanych z pytaniem; jedno zdanie = jeden fakt lub decyzja. *Skad:* prosba uzytkownika 2026-10-17 — po wywolaniach API odpowiedz na proste pytanie o stan maszyn byla zakopana za wydrukami. |
 | 1.20 | 2026-10-16 | Regula **4.12 doprecyzowana**: importowany jest skrot `STYL_PISANIA.md` (<= 3 KB, test), pelna wersja `STYL_PISANIA_PELNY.md` na zadanie; zasada "zasady piszemy zwiezle". *Skad:* uwaga uzytkownika — dbamy o kompaktowe zasady zawsze (plik wciagany do kazdej sesji w 23 repo kosztuje tokeny). |
