@@ -395,7 +395,36 @@ def build_command(exe, paths, system, model=None, allow=None, deny=None,
     return cmd
 
 
-def ask(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, runner=None,
+def ask(*args, **kwargs):
+    """(answer, error) -- see _ask_inner. Every call is also written to the model usage log
+    (monitor/model_usage.py): who asked (calling module), which model, prompt, answer, time,
+    tokens/cost when the CLI reports them. Logging never changes the result."""
+    import sys
+    import time
+    caller = sys._getframe(1).f_globals.get("__name__", "?")
+    if caller == "__main__":  # a script run directly: name it, "__main__" says nothing in the log
+        import os
+        caller = os.path.splitext(os.path.basename(sys.argv[0] or ""))[0] or "__main__"
+    question = kwargs.get("question", args[1] if len(args) > 1 else "")
+    model = kwargs.get("model", args[3] if len(args) > 3 else None)
+    own_stats = kwargs.get("stats") is None and len(args) <= 11
+    if own_stats:
+        kwargs["stats"] = {}
+    t0 = time.time()
+    answer, error = _ask_inner(*args, **kwargs)
+    try:
+        import model_usage
+        st = kwargs.get("stats") or {}
+        model_usage.record(caller, model, question, answer or "", time.time() - t0,
+                           ok=error is None, error=error or "",
+                           tokens_in=st.get("tokens_in"), tokens_out=st.get("tokens_out"),
+                           cost_usd=st.get("cost_usd"))
+    except Exception:  # noqa: BLE001
+        pass
+    return answer, error
+
+
+def _ask_inner(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT_S, runner=None,
         context=None, allow=None, deny=None, env=None, use_digest=False,
         thread_id=None, first_turn=True, stats=None):
     """(answer, error). Never raises: a failed answer is a reported error, not a dead caller.
