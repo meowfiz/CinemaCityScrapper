@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.23 (2026-10-17). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.24 (2026-10-18). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -168,6 +168,19 @@ koniec muszą wypychać zmiany, bo druga maszyna musi móc zawsze pobrać najśw
 repo". Reguły 2.8 i 2.9 łapią odpowiednio koniec sesji i zadanie >= 10 min, a 2.10
 łapie Claude kończącego zadanie w rozmowie; żadna z nich nie opisuje jawnie
 agenta autonomous, który może skończyć pracę poza rozmową i bez hooka sesji.
+
+**2.13 Dane projektu jadą między maszynami przez SSH, nie na dyskach.** To, czego nie niesie git
+(artefakty, pomiary, etykiety — reguła 2.5), przenosi `python tools/transfer.py --send --for <maszyna>
+--repo <projekt>` z repo `project_integration` (skill `przerzuc`, ten sam w każdym projekcie): paczka to
+**różnica spisów** obu maszyn wg `.claude/transfer.json` projektu, transport SSH przez Tailscale
+z **wznawianiem** (od rozmiaru pliku po stronie zdalnej) i **SHA-256 całości** po obu stronach, rozpakowanie
+na drugiej maszynie **bez nadpisywania i bez usuwania** (różny plik = `KONFLIKT` w raporcie, zostaje
+nietknięty). Projekt bez deklaracji najpierw deklaruje (`--check` zgłasza `[ZADEKLARUJ]`). Przed startem
+sprawdź, czy ten projekt nie ma już trwającego przerzutu (dwa procesy w jeden plik zdalny go psują).
+*Dlaczego:* decyzja użytkownika 2026-10-18 („nie będę latał z dyskami”). vESSA pokazała mechanizm na
+paczce 2,4 GB (0,24 MB/s przez przekaźnik DERP: godziny, więc wznawianie jest obowiązkowe; kontrola rozmiaru
+wykryła dwa procesy piszące do jednego pliku); hub miał już spisy i paczki na dysk (`--check`, `--pack`),
+brakowało transportu.
 
 **2.12 `start` odtwarza na maszynie wszystkie repozytoria — także nowe.** `tools/ready.py --apply`
 (skill `start`) sprawdza i naprawia trzy rzeczy, nie tylko repo zbiorcze: (1) **nowe repo** —
@@ -480,6 +493,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.24 | 2026-10-18 | Regula **2.13 "dane projektu jada miedzy maszynami przez SSH, nie na dyskach"**: `transfer.py --send` (skill `przerzuc`), paczka = roznica spisow, wznawianie + SHA-256, rozpakowanie bez nadpisywania i usuwania. *Skad:* decyzja uzytkownika 2026-10-18 po przerzucie vESSA (2,4 GB przez SSH) -- "nie bede latal z dyskami". |
 | 1.23 | 2026-10-17 | Regula **2.12 (3)**: `start` zawsze robi pull -- rebase z autostash przy brudnym drzewie lub lokalnych commitach, cofany przy konflikcie. *Skad:* uzytkownik 2026-10-17: `start` zostawil RibnXtr2026 7 commitow za origin. |
 | 1.22 | 2026-10-17 | Sekcja 9, wiersz `tools/statusline.py`: **pasek okna zawsze pokazuje model sesji (`[sonnet]`, `[opus]`...) z payloadu**, a nie z lokalnego pliku economy; `start` (`ready.py`) pilnuje, ze zainstalowany pasek jest bajt w bajt z repo, wiec nowa maszyna dostaje to bez sprawdzania. *Skad:* uzytkownik 2026-10-17 -- okna na drugiej maszynie mialy `[sonnet]`, na tej nie, bo znacznik zalezal od `model_mode.json`, ktory jest per maszyna. |
 | 1.21 | 2026-10-17 | Regula **7.9 „odpowiedz na pytanie konczy sie sekcja w punktach"**: pelne zdania, prosty jezyk, liczby gdzie istotne, zero belkotu i technikaliow niezwiazanych z pytaniem; jedno zdanie = jeden fakt lub decyzja. *Skad:* prosba uzytkownika 2026-10-17 — po wywolaniach API odpowiedz na proste pytanie o stan maszyn byla zakopana za wydrukami. |
