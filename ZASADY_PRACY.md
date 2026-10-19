@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.24 (2026-10-18). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.25 (2026-10-19). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -169,19 +169,6 @@ repo". Reguły 2.8 i 2.9 łapią odpowiednio koniec sesji i zadanie >= 10 min, a
 łapie Claude kończącego zadanie w rozmowie; żadna z nich nie opisuje jawnie
 agenta autonomous, który może skończyć pracę poza rozmową i bez hooka sesji.
 
-**2.13 Dane projektu jadą między maszynami przez SSH, nie na dyskach.** To, czego nie niesie git
-(artefakty, pomiary, etykiety — reguła 2.5), przenosi `python tools/transfer.py --send --for <maszyna>
---repo <projekt>` z repo `project_integration` (skill `przerzuc`, ten sam w każdym projekcie): paczka to
-**różnica spisów** obu maszyn wg `.claude/transfer.json` projektu, transport SSH przez Tailscale
-z **wznawianiem** (od rozmiaru pliku po stronie zdalnej) i **SHA-256 całości** po obu stronach, rozpakowanie
-na drugiej maszynie **bez nadpisywania i bez usuwania** (różny plik = `KONFLIKT` w raporcie, zostaje
-nietknięty). Projekt bez deklaracji najpierw deklaruje (`--check` zgłasza `[ZADEKLARUJ]`). Przed startem
-sprawdź, czy ten projekt nie ma już trwającego przerzutu (dwa procesy w jeden plik zdalny go psują).
-*Dlaczego:* decyzja użytkownika 2026-10-18 („nie będę latał z dyskami”). vESSA pokazała mechanizm na
-paczce 2,4 GB (0,24 MB/s przez przekaźnik DERP: godziny, więc wznawianie jest obowiązkowe; kontrola rozmiaru
-wykryła dwa procesy piszące do jednego pliku); hub miał już spisy i paczki na dysk (`--check`, `--pack`),
-brakowało transportu.
-
 **2.12 `start` odtwarza na maszynie wszystkie repozytoria — także nowe.** `tools/ready.py --apply`
 (skill `start`) sprawdza i naprawia trzy rzeczy, nie tylko repo zbiorcze: (1) **nowe repo** —
 repo właściciela na GitHubie z `ZASADY_PRACY.md` w korzeniu, którego nie ma w `tools/repos.txt`,
@@ -199,6 +186,19 @@ repo ręcznie, a nie przez `new_project.py`, i tak zostanie wyłapany przy najbl
 *Dlaczego:* 2026-10-13 `sasagiri_book` założone ręcznie w pracy (paczka wypchnięta, wpis tylko
 w tamtym `monitor_repos.env`) było niewidoczne w domu, 4 projekty z listy nie miały tu klonu,
 a 16 z 19 klonów było za origin (RibnXtr2026 o 43 commity) — bo `start` podciągał tylko hub.
+
+**2.13 Dane projektu jadą między maszynami przez SSH, nie na dyskach.** To, czego nie niesie git
+(artefakty, pomiary, etykiety — reguła 2.5), przenosi `python tools/transfer.py --send --for <maszyna>
+--repo <projekt>` z repo `project_integration` (skill `przerzuc`, ten sam w każdym projekcie): paczka to
+**różnica spisów** obu maszyn wg `.claude/transfer.json` projektu, transport SSH przez Tailscale
+z **wznawianiem** (od rozmiaru pliku po stronie zdalnej) i **SHA-256 całości** po obu stronach, rozpakowanie
+na drugiej maszynie **bez nadpisywania i bez usuwania** (różny plik = `KONFLIKT` w raporcie, zostaje
+nietknięty). Projekt bez deklaracji najpierw deklaruje (`--check` zgłasza `[ZADEKLARUJ]`). Przed startem
+sprawdź, czy ten projekt nie ma już trwającego przerzutu (dwa procesy w jeden plik zdalny go psują).
+*Dlaczego:* decyzja użytkownika 2026-10-18 („nie będę latał z dyskami”). vESSA pokazała mechanizm na
+paczce 2,4 GB (0,24 MB/s przez przekaźnik DERP: godziny, więc wznawianie jest obowiązkowe; kontrola rozmiaru
+wykryła dwa procesy piszące do jednego pliku); hub miał już spisy i paczki na dysk (`--check`, `--pack`),
+brakowało transportu.
 
 ---
 
@@ -471,7 +471,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `project_files/python/` (lub `src/`) | kod analityczny | — |
 | `project_files/python/tests/` | testy nazywające porażki | CI / meta-projekt (`pytest -q`) |
 | `project_files/run_files/` | artefakty i logi, **nie w repo** | paczka przenoszenia |
-| `tools/ready.py`, `tools/statusline.py` | **konfiguracja MASZYNY**, nie repozytorium: `ready.py --apply` doprowadza maszyne do stanu z repo (klon, nowe repo i klony projektow -- regula 2.12, pack, przelacznik wykonywania, uslugi tla, swiezosc bramki glosowej, wersja dodatku HA, pasek statusu z modelem sesji -- regula 1.22) i wypisuje w punktach, czego nie umial zrobic sam; `statusline.py --install` wpina pasek zuzycia kontekstu i limitow w `~/.claude/settings.json`, czyli **raz na maszyne, dla wszystkich projektow naraz**. Dlatego tego NIE MA w packu -- pack instaluje pliki DO repozytoriow, a to sa ustawienia maszyny. Skill `start` wola `ready.py --apply`, wiec nowa maszyna nie wymaga pamietania krokow | czlowiek przy nowej maszynie, Claude Code |
+| `tools/ready.py`, `tools/statusline.py` | **konfiguracja MASZYNY**, nie repozytorium: `ready.py --apply` doprowadza maszyne do stanu z repo (klon, nowe repo i klony projektow -- regula 2.12, pack, przelacznik wykonywania, uslugi tla, swiezosc bramki glosowej, wersja dodatku HA, pasek statusu z modelem sesji -- wersja 1.22) i wypisuje w punktach, czego nie umial zrobic sam; `statusline.py --install` wpina pasek zuzycia kontekstu i limitow w `~/.claude/settings.json`, czyli **raz na maszyne, dla wszystkich projektow naraz**. Dlatego tego NIE MA w packu -- pack instaluje pliki DO repozytoriow, a to sa ustawienia maszyny. Skill `start` wola `ready.py --apply`, wiec nowa maszyna nie wymaga pamietania krokow | czlowiek przy nowej maszynie, Claude Code |
 | `*_provenance.py`, `*_transfer_package.py` | prowenienecja, paczka | — |
 
 Meta-projekt może więc dla każdego repo odczytać: **stan** (`start.md`), **oś czasu**
@@ -493,28 +493,7 @@ wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.25 | 2026-10-19 | Skrocenie pliku ponizej limitu 40 000 znakow (ostrzezenie Claude Code): historia wersji i rozszerzone uzasadnienia przeniesione do notes/ZASADY_HISTORIA.md, tresc bez zmian. *Skad:* ostrzezenie uzytkownika o dlugosci pliku. |
 | 1.24 | 2026-10-18 | Regula **2.13 "dane projektu jada miedzy maszynami przez SSH, nie na dyskach"**: `transfer.py --send` (skill `przerzuc`), paczka = roznica spisow, wznawianie + SHA-256, rozpakowanie bez nadpisywania i usuwania. *Skad:* decyzja uzytkownika 2026-10-18 po przerzucie vESSA (2,4 GB przez SSH) -- "nie bede latal z dyskami". |
-| 1.23 | 2026-10-17 | Regula **2.12 (3)**: `start` zawsze robi pull -- rebase z autostash przy brudnym drzewie lub lokalnych commitach, cofany przy konflikcie. *Skad:* uzytkownik 2026-10-17: `start` zostawil RibnXtr2026 7 commitow za origin. |
-| 1.22 | 2026-10-17 | Sekcja 9, wiersz `tools/statusline.py`: **pasek okna zawsze pokazuje model sesji (`[sonnet]`, `[opus]`...) z payloadu**, a nie z lokalnego pliku economy; `start` (`ready.py`) pilnuje, ze zainstalowany pasek jest bajt w bajt z repo, wiec nowa maszyna dostaje to bez sprawdzania. *Skad:* uzytkownik 2026-10-17 -- okna na drugiej maszynie mialy `[sonnet]`, na tej nie, bo znacznik zalezal od `model_mode.json`, ktory jest per maszyna. |
-| 1.21 | 2026-10-17 | Regula **7.9 „odpowiedz na pytanie konczy sie sekcja w punktach"**: pelne zdania, prosty jezyk, liczby gdzie istotne, zero belkotu i technikaliow niezwiazanych z pytaniem; jedno zdanie = jeden fakt lub decyzja. *Skad:* prosba uzytkownika 2026-10-17 — po wywolaniach API odpowiedz na proste pytanie o stan maszyn byla zakopana za wydrukami. |
-| 1.20 | 2026-10-16 | Regula **4.12 doprecyzowana**: importowany jest skrot `STYL_PISANIA.md` (<= 3 KB, test), pelna wersja `STYL_PISANIA_PELNY.md` na zadanie; zasada "zasady piszemy zwiezle". *Skad:* uwaga uzytkownika — dbamy o kompaktowe zasady zawsze (plik wciagany do kazdej sesji w 23 repo kosztuje tokeny). |
-| 1.19 | 2026-10-16 | Regula **4.12 „teksty piszemy wg `notes/STYL_PISANIA.md`”** (zasady anti-AI-style) + import `@notes/STYL_PISANIA.md`; plik w paczce (`install_pack.py`, `CODE_FILES`). *Skad:* polecenie uzytkownika — zebrac wzorce stylu AI z Wikipedii i 2-3 najnowszych zrodel, sformulowac zasady i dolaczac je w kazdym projekcie, takze nowym. |
-| 1.18 | 2026-10-14 | Regula **7.6 rozszerzona o dwa punkty**: (1) **pytanie glosowe dostaje bezposrednia odpowiedz** — `Glosowo:` mowi wprost, co jest odpowiedzia, nie opisuje procesu; krotko i po ludzku, bez technikaliow; (2) **machine-tag routing** — `[glos-NAME]` w prompcie daje `Glosowo-NAME:` w odpowiedzi; tylko urzadzenie z pasujacym NAME to odtwarza. *Skad:* prosba uzytkownika 2026-10-14 — brak panowania nad tym, kto slyszy co; PC gral odpowiedzi pytane z telefonu (broadcast bez tagu). |
-| 1.17 | 2026-10-13 | Regula **2.12 „start odtwarza na maszynie wszystkie repozytoria"**: `ready.py` rejestruje repo z ZASADAMI spoza `repos.txt`, klonuje brakujace projekty i robi fast-forward czystych klonow. *Skad:* `sasagiri_book` zalozone recznie w pracy bylo niewidoczne w domu; 4 projekty bez klonu, 16/19 klonow za origin, bo `start` podciagal tylko hub. |
-| 1.16 | 2026-10-13 | Regula **7.8 „zadanie dluzsze niz 2 min dostaje stempel czasowy"**: pierwsza linia `[HH:MM]`, ostatnia `[HH:MM→HH:MM · Nm]`. *Skad:* prosba uzytkownika — ma otwarte okna z Claude'em pracujacym w tle i bez stempli nie wie ile okno bylo bezczynne miedzy zadaniami ani ile samo zadanie trwalo. Monitor liczy czas po stronie serwera (regula 2.9), ale to widac na telefonie, nie w oknie. |
-| 1.15 | 2026-10-13 | Regula **7.6 doprecyzowana**: linia `Glosowo:` MUSI miec polskie diakrytyki (reguly 4.1 ASCII dotyczy tylko zrodel kompilowanych i komentarzy kodu, nie tekstu dla TTS). *Skad:* okno projektu Jacek na telefonie — Claude pisal „Glosowo: rosnace archiwum zdjec" i syntezator mowil „zjetc"; slownik fonetyczny lata tylko znane formy, a Claude ma ich generowac nieskonczonosc. Rozszerzono tez `tools/phonetize/pl.json` o ~80 wyrazow z log sesji (sciezek, wsrod, mnogosci, montaz, chrzaszcz, powylamywanymi, nalezy, czlowiek, przegladu, kadrow, calkiem, rzadu, ujecia, calosc, wysylania, rosnace, wyciaga, rece, slowo), ale to tylko druga linia obrony. |
-| 1.14 | 2026-10-11 | Regula **7.7 „mail wychodzi tylko na wyrazna prosbe"**: skill `mail`, do siebie od razu, do innych po akceptacji (`--potwierdzone`), haslo w Menedzerze poswiadczen Windows. *Skad:* decyzja uzytkownika -- wysylka maila z okien projektow. |
-| 1.13 | 2026-10-11 | Regula **7.6 „polecenie glosowe dostaje odpowiedz do ucha"**: prompt z `[glos]` ma linie `Glosowo:` po rozeznaniu i na koniec; czytana jest tylko ona, wybranym glosem; projekt moze oglosic tryb rozmowy. *Skad:* prosba uzytkownika -- przy zleceniu z auta chce uslyszec, co Claude moze zrobic i co zrobil, a bramka czytala cala techniczna odpowiedz. |
-| 1.12 | 2026-10-10 | Regula **2.11 'praca samodzielna agenta konczy sie commitem i pushem'** -- rozszerzenie 2.10 na tryby autonomous (petla profesor-student, Agent worktree, orchestrator, remote tasks). Odsylacz w 2.1 rozszerzony o 2.11. *Skad:* decyzja uzytkownika „jak pracuja samodzielnie to na koniec musza wypychac zmiany, bo druga maszyna musi moc zawsze pobrac najswiezsze repo". |
-| 1.11 | 2026-09-21 | Regula **2.10 'praca skonczona jest praca wypchnieta'** scalona z repo HA do kanonu (decyzja uzytkownika 2026-09-20, podjeta w tamtej sesji). Odsylacz w 2.1 rozszerzony o 2.10. *Skad:* `rules_sync.py --check` pokazal HA jako **zmodyfikowane**, a `--pull` ujawnil, ze oba pliki nosza numer **1.10 z roznymi datami i roznej tresci** -- czyli kanon i repo rozjechaly sie po cichu. Numer wersji nie jest tozsamoscia pliku; tozsamoscia jest tresc, i dlatego `--push` odmawia nadpisania pliku 'zmodyfikowanego'. |
-| 1.10 | 2026-09-21 | Sekcja 9 zyskuje `tools/ready.py` i `tools/statusline.py`: **konfiguracja maszyny ma jedno wejscie**, a pasek zuzycia jest jego czescia. *Skad:* uzytkownik pobral repo na drugiej maszynie i zapytal, dlaczego nie ma tam paska -- `tools/statusline.py` lezal w repo od 09-20, ale **nic go nie propagowalo i nic o nim nie mowilo**, bo instalacja jest jednorazowa i trzeba bylo o niej wiedziec. Plik w repo nie jest propagacja; propagacja to krok, ktory ktos wykona bez czytania cudzej notatki. |
-| 1.9 | 2026-09-19 | Reguła 7.5 „lakonicznie": odpowiedź jest krótka, chyba że użytkownik poprosi o długą. *Skąd:* prośba użytkownika powtórzona trzeci raz — „bądź w końcu lakoniczny!!! dodaj to sobie do reguł". |
-| 1.8 | 2026-09-19 | Sekcja 9 zyskuje `monitor/services.py`: **jeden punkt wejścia** podnoszący usługi tła maszyny (worker pytań, worker zleceń, bramka głosowa), wołany z hooka `SessionStart` i z Autostartu. *Skąd:* trzy procesy startowały trzema różnymi drogami (wpis logowania, ręcznie, otwarty terminal), a komentarz w `ask_worker.py` od miesiąca twierdził, że robi to hook `SessionStart` — czego żaden `settings.json` nie zawierał. Zmierzone 2026-09-19: worker zleceń nie działał od ~16 h (zamek nieodświeżany), więc zlecenie z telefonu czekałoby w kolejce bez śladu. Stan usługi jest **pomiarem** (świeżość zamka, otwarty port), bo zamek po martwym procesie to nie dowód. |
-| 1.7 | 2026-09-16 | Reguła 2.8: po lokalnym commicie automat **rebase'uje na upstream i pushuje** (czysty rebase, ponowne G3 i G4, konflikt → `abort` i commit lokalny, nigdy `--force`; wyłącznik `{"rebase": false}`). Bramka G2 zatrzymuje commit, gdy nowy plik źródłowy zostaje poza nim w katalogu, do którego commitujemy źródła. *Skąd:* decyzja użytkownika „nie ma sensu trzymać commitów niewypchniętych”; oraz znalezisko sesji Car — auto-sync wypchnął zmodyfikowany `poc/ask_server.py` bez nowych `poc/intent.py` i `poc/aliases.json`, czyli drzewo z `ImportError`, które pecet w pracy pobrałby `git pull` co godzinę, a watchdog restartowałby w milczeniu. |
-| 1.6 | 2026-09-15 | Reguła 2.9 „zadanie dłuższe niż 10 minut kończy się commitem i pushem — automatycznie" (zegar zadania w `heartbeat.py`, próg `MONITOR_AUTOSYNC_MIN_S` = 600 s, te same bramki G1–G5 co 2.8); 2.1 dostaje odsyłacz „poza 2.8 i 2.9". *Skąd:* decyzja użytkownika — im dłuższe zadanie, tym większa szansa, że nie ma go przy komputerze, a wynik jest potrzebny na repo z drugiej maszyny lub z innego projektu. |
-| 1.5 | 2026-09-15 | Reguły 4.10 „tekst z zewnątrz czytamy jako bajty i dekodujemy UTF-8 jawnie" i 4.11 „nieodwracalna naprawa danych ma warunek akceptacji". *Skąd:* `monitor/heartbeat.py` czytał ładunek hooka przez `sys.stdin.read()`, a `sys.stdin.encoding` na polskim Windowsie to cp1250 — każda polska litera szła na telefon i do HA jako mojibake (28 pól w 7 repo). Naprawa źródła + odwrócenie uszkodzenia w historii (`server/mojibake.py`, run po runie, z listą dopuszczalnych zakresów Unicode). |
-| 1.4 | 2026-09-14 | Reguła 2.8 „synchronizacja na koniec sesji automatyczna, ale bramkowana" (`monitor/auto_sync.py --spawn` z hooka `SessionEnd`; bramki G1–G5: notatka sesji, allowlista sciezek, zero usuniec, pytest, upstream przodkiem HEAD; wynik jako etykieta heartbeat). *Skad:* decyzja uzytkownika w sesji 65 RibnXtr2026 — commity lokalne bez pusha byly niewidoczne z drugiej maszyny, a 2.1 nie pozwalala Claude'owi pushowac; hook `SessionStart` z PowerShell `ConvertTo-Json` dawal „Unterminated string" w aplikacji desktop — zastapiony `monitor/session_context.py` (czysty ASCII JSON). |
-| 1.3 | 2026-09-11 | Reguła 1.5 „nazwa zadania na starcie" (`heartbeat.py --event label`); wiersz sekcji 9 o etykiecie i stanie „czeka"; hooki w `.claude/settings.json` zakotwiczone w `$CLAUDE_PROJECT_DIR` i rozszerzone o `StopFailure` i `Notification`. *Skąd:* zmiana OpenSpec `task-timer-panel` w `project_integration` — monitor liczy czas zadania (prompt → stop) i powiadamia tylko powyżej progu (60 s), więc potrzebuje lakonicznej nazwy w chwili startu; hook z względną ścieżką padł, gdy `cd` narzędzia Bash zmieniło katalog roboczy sesji. |
-| 1.2 | 2026-09-10 | Reguła 2.7 „zero usunięć przed pushem z automatu" (kod wyjścia klonu bez potoku, czysty status, zero `D` w diffie, jawna tożsamość committera). *Skąd:* incydent rollout'u paczki w `project_integration` — płytki klon + połknięty kod błędu = usunięte drzewa w 3 repo, naprawione revertem. |
-| 1.1 | 2026-09-10 | Meta-projekt `project_integration` (zmiana OpenSpec `project-monitor`): sekcja 9 zyskuje `.claude/settings.json` (hooki heartbeat) i `monitor/heartbeat.py` + `taskparse.py`; opis instalacji paczki i synchronizacji tego pliku. *Dlaczego:* bez wspólnych hooków nie ma sygnału „pracuje teraz", a bez jednego parsera `tasks.md` liczba w STATUS.md i na telefonie rozjeżdżają się. |
-| 1.0 | 2026-09-10 | Konsolidacja: CLAUDE.md projektu, reguły `.cursor/rules`, pamięć feedback, wnioski sesji 58–61 (7× błąd kalibracji na innej populacji, heredoc, `assert` przy `replace`, prerejestracja, wielokrotność, prowenienecja, gwarancje konformalne, pół-automat, paczka przenoszenia) |
+
+Starsze wpisy (pełna tabela 1.0–1.25): `project_integration/notes/ZASADY_HISTORIA.md`.
