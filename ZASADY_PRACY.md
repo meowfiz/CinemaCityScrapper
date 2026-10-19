@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.25 (2026-10-19). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.26 (2026-10-19). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -58,7 +58,7 @@ mówią, co się właściwie skończyło.
 
 ## 2. Git i dwie maszyny
 
-**2.1 Claude nie pushuje bez prośby** (poza 2.8, 2.9, 2.10 i 2.11). Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
+**2.1 Claude nie pushuje bez prośby** (poza 2.8–2.12). Ale gdy użytkownik mówi „kończymy / koniec / rób commit /
 wypchnij / przenoszę się na drugą maszynę", Claude sprawdza `git status -sb` i **albo pushuje na
 prośbę, albo mówi wprost: „commit jest lokalny, nie wypchnięty"**. *Dlaczego:* lokalny commit jest
 niewidoczny z drugiej maszyny; ciche pominięcie kosztuje pół dnia.
@@ -116,8 +116,9 @@ Kazdy przebieg dopisuje blok do
 lokalnym niewidocznym z drugiej maszyny; automat z bramkami daje widocznosc bez ryzyka z 2.7 (decyzja
 uzytkownika 2026-09-14, sesja 65 RibnXtr2026). Rebase z automatu doszło 2026-09-16 (decyzja użytkownika: „nie ma sensu trzymać commitów niewypchniętych”) — to jest dokładnie ruch, który przepisuje reguła 2.3, a jedyną część wymagającą człowieka („obejrzeć, co tam jest”) automat sprawdza mechanicznie: czysty rebase, zero usunięć, zielone testy.
 2.1 nadal obowiazuje **w trakcie** sesji: Claude nie pushuje
-na wlasna reke — pushuje ten sam automat, po zamknieciu sesji (tu) albo po zadaniu dluzszym
-niz 10 minut (2.9).
+w srodku pracy na wlasna reke — pushuje ten sam automat, po zamknieciu sesji (tu) albo po zadaniu
+dluzszym niz 10 minut (2.9); na KONIEC zadania pushuje tez sam Claude albo agent (2.10, 2.11), po tych
+samych bramkach.
 
 **2.9 Zadanie dłuższe niż 10 minut kończy się commitem i pushem — automatycznie.**
 Hook `Stop` mierzy czas zadania na tej maszynie (`monitor/heartbeat.py`, zegar zadania: prompt
@@ -406,15 +407,15 @@ Reszta odpowiedzi zostaje techniczna, jak zawsze — **czytana jest tylko linia 
 wybranym na stronie bramki / w HA. Projekt może w swoim `CLAUDE.md` ogłosić **tryb rozmowy**
 (np. nauka języka): wtedy cała odpowiedź jest do odsłuchu i znacznik nie jest potrzebny.
 
+*Dlaczego (reguła 7.6 jako całość):* prośba użytkownika 2026-10-11 — przy zleceniu z auta chce usłyszeć „co mogę zrobić /
+co zrobiłem”, a nie zalew parametrów; bramka czytała dotąd całą odpowiedź modelu, z PR-ami
+i ścieżkami.
+
 **Routing głosowy między urządzeniami (machine-tag).** Jeśli prompt ma tag `[glos-NAME]`
 (dokłada go strona okna w przeglądarce, `NAME` to identyfikator urządzenia), odpowiedź ma
 postać `Glosowo-NAME:` z tym samym identyfikatorem. Przeglądarka odtwarza tylko linie
 z własnym `NAME` — inne urządzenia ich nie słyszą. Nietagowane `Glosowo:` gra na wszystkich.
 *Dlaczego:* bez tagu PC grał odpowiedzi wysłane z telefonu i odwrotnie (broadcast 2026-10-14).
-
-*Dlaczego:* prośba użytkownika 2026-10-11 — przy zleceniu z auta chce usłyszeć „co mogę zrobić /
-co zrobiłem”, a nie zalew parametrów; bramka czytała dotąd całą odpowiedź modelu, z PR-ami
-i ścieżkami.
 
 **7.7 Mail wychodzi tylko na wyraźną prośbę.** Wysyłka przez skill `mail`
 (`project_integration/tools/send_mail.py`, Gmail): do siebie (`--to self`) od razu; do kogokolwiek
@@ -488,12 +489,13 @@ Wzbogacenie reguł w jednym repo → `rules_sync.py --pull <repo>` → scalenie 
 ## 10. Zmiany tego pliku
 
 Reguła dochodzi, gdy **coś poszło źle i wiemy dlaczego**, albo gdy użytkownik podjął decyzję
-projektową obowiązującą dalej. Wpis w tabeli poniżej + podbicie wersji w nagłówku + wgranie do
-wszystkich repo.
+projektową obowiązującą dalej. Wpis w tabeli poniżej (tu zostają dwie ostatnie wersje, starsze przenosi się do
+`project_integration/notes/ZASADY_HISTORIA.md`, gdzie jest pełna tabela) + podbicie wersji w nagłówku +
+wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.26 | 2026-10-19 | Spojnosc regul po skroceniu pliku: 2.1 wymienia wyjatki 2.8-2.12; 2.8 mowi, ze na koniec zadania pushuje tez Claude/agent (2.10, 2.11); 7.6 ma jedno ogolne *Dlaczego* przed sekcja machine-tag; sekcja 10 opisuje podzial tabeli (tu dwie ostatnie wersje, reszta w ZASADY_HISTORIA). Bez zmiany znaczenia regul. *Skad:* raport agenta Opus po skroceniu pliku, akceptacja uzytkownika 2026-10-19. |
 | 1.25 | 2026-10-19 | Skrocenie pliku ponizej limitu 40 000 znakow (ostrzezenie Claude Code): historia wersji i rozszerzone uzasadnienia przeniesione do notes/ZASADY_HISTORIA.md, tresc bez zmian. *Skad:* ostrzezenie uzytkownika o dlugosci pliku. |
-| 1.24 | 2026-10-18 | Regula **2.13 "dane projektu jada miedzy maszynami przez SSH, nie na dyskach"**: `transfer.py --send` (skill `przerzuc`), paczka = roznica spisow, wznawianie + SHA-256, rozpakowanie bez nadpisywania i usuwania. *Skad:* decyzja uzytkownika 2026-10-18 po przerzucie vESSA (2,4 GB przez SSH) -- "nie bede latal z dyskami". |
 
 Starsze wpisy (pełna tabela 1.0–1.25): `project_integration/notes/ZASADY_HISTORIA.md`.
