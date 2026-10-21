@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.26 (2026-10-19). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.27 (2026-10-21). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -31,10 +31,28 @@ poprawić, gdy przestanie pasować.
 ## Kluczowe decyzje / zmiany semantyki
 ## Aktywne TODO / pending
 ## Pliki zmienione        (plik: co i dlaczego)
+## W trakcie (checkpoint)  -- nadpisywany przy każdym podzadaniu; usuwany na koniec sesji
 ```
 
 *Dlaczego:* praca idzie na dwóch maszynach i w wielu sesjach; bez notatki następna sesja zaczyna
 od archeologii. Użytkownik **nigdy nie musi o tym przypominać** — brak notatki to błąd Claude'a.
+
+**1.6 Checkpoint po każdym ukończonym podzadaniu.** Gdy Claude kończy jedno podzadanie i przechodzi
+do następnego (np. skończyłem implementację, zaczynam testy; skończyłem testy, zaczynam notatki),
+nadpisuje sekcję `## W trakcie (checkpoint)` w pliku `notes/sesje/RRRR-MM-DD-sesja.md`:
+
+```
+## W trakcie (checkpoint)
+Zadanie: <co teraz>
+Stan: <co jest gotowe, co nie>
+Następny krok: <jedno zdanie>
+```
+
+Sekcja jest **nadpisywana**, nie doklejana. Znika z notatki na koniec sesji (zastępuje ją `## Co zrobiono`).
+*Dlaczego:* kompaktowanie kontekstu generuje streszczenie z bieżącego stanu rozmowy — ale gdy rozmowa
+jest długa i kompaktowanie nastąpi w środku zadania, checkpoint w pliku jest jedynym zapisem
+aktualnego stanu, który nowa sesja może przeczytać bez rekonstrukcji. Reguła 1.1 (notatka na koniec)
+chroni między sesjami; 1.6 chroni wewnątrz sesji.
 
 **1.2 Notatka zapisuje liczby, nie przymiotniki.** „Poprawiło się" nie jest wynikiem;
 „95,1% → 94,8%, optymizm 0,4 pkt proc." jest.
@@ -495,6 +513,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.27 | 2026-10-21 | Reguła 1.6: checkpoint po każdym podzadaniu — sekcja `## W trakcie (checkpoint)` nadpisywana na bieżąco, chroni przed utratą stanu przy kompaktowaniu kontekstu w środku sesji. Szablon notatki sesji w 1.1 rozszerzony o tę sekcję. *Skąd:* prośba użytkownika 2026-10-21 o profesjonalne rozwiązanie problemu kompaktowania kontekstu we wszystkich projektach. |
 | 1.26 | 2026-10-19 | Spojnosc regul po skroceniu pliku: 2.1 wymienia wyjatki 2.8-2.12; 2.8 mowi, ze na koniec zadania pushuje tez Claude/agent (2.10, 2.11); 7.6 ma jedno ogolne *Dlaczego* przed sekcja machine-tag; sekcja 10 opisuje podzial tabeli (tu dwie ostatnie wersje, reszta w ZASADY_HISTORIA). Bez zmiany znaczenia regul. *Skad:* raport agenta Opus po skroceniu pliku, akceptacja uzytkownika 2026-10-19. |
 | 1.25 | 2026-10-19 | Skrocenie pliku ponizej limitu 40 000 znakow (ostrzezenie Claude Code): historia wersji i rozszerzone uzasadnienia przeniesione do notes/ZASADY_HISTORIA.md, tresc bez zmian. *Skad:* ostrzezenie uzytkownika o dlugosci pliku. |
 
