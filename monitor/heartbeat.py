@@ -52,8 +52,8 @@ EVENTS = ("session_start", "prompt", "tool", "stop", "stop_failure", "waiting", 
           "label", "progress", "unpushed")
 NET_TIMEOUT_S = 2.0
 TOOL_THROTTLE_S = 30.0
-PROMPT_EXCERPT_LEN = 120
-RESULT_EXCERPT_LEN = 120
+PROMPT_EXCERPT_LEN = 160
+RESULT_EXCERPT_LEN = 160
 LABEL_LEN = 80
 LOG_NAME = "monitor_heartbeat.log"
 CONTINUE_WINDOW_S = 120.0  # same window the server uses to treat a prompt as a continuation
@@ -499,6 +499,19 @@ def first_sentence(text, limit):
     return s[:limit] if s else None
 
 
+_VOICE_LINE = re.compile(r"^\s*Glosowo(?:-[\w.-]+)?\s*:\s*(.+?)\s*$", re.I | re.M)
+
+
+def result_summary(text, limit):
+    """Short summary of Claude's answer for the project diary: the last `Glosowo:` line (ZASADY 7.6
+    makes it a one-or-two-sentence summary) if the answer has one, else its first sentence."""
+    if isinstance(text, str):
+        voice = _VOICE_LINE.findall(text)
+        if voice:
+            return " ".join(voice[-1].split())[:limit]
+    return first_sentence(text, limit)
+
+
 SYNTHETIC_PROMPT_MARKS = ("<task-notification>", "<system-reminder>", "[SYSTEM NOTIFICATION", "<<autonomous-loop")
 
 
@@ -539,7 +552,7 @@ def build_event(event, hook, cfg, label=None, agents=None):
             if tokens is not None:
                 ev["tokens"] = tokens
         if cfg.get("MONITOR_SEND_PROMPT", "1") != "0":
-            excerpt = first_sentence(hook.get("last_assistant_message"), RESULT_EXCERPT_LEN)
+            excerpt = result_summary(hook.get("last_assistant_message"), RESULT_EXCERPT_LEN)
             if excerpt:
                 ev["result_excerpt"] = excerpt
     if event == "stop_failure":
@@ -693,6 +706,74 @@ def warn_unpushed(cfg, url, token, cwd):
         log("unpushed check failed: %r" % (e,))
 
 
+# -- "should I push?" is not a question (rules 2.10/2.11) -----------------------------------------
+# 2026-10-22: every project had rule 2.10 in the file Claude imports, yet finished work still ended
+# with "czy wypchnac?". A rule in a 37 KB file loses to the default "push only when asked"; a Stop
+# hook that answers the question is the only version that does not depend on being remembered.
+
+PUSH_QUESTION_RE = re.compile(r"(wypchn|pushn|push|commit)[^?]{0,160}\?", re.I)
+
+
+def asks_about_push(text):
+    """True when the tail of the reply asks the user whether to commit/push. Pure."""
+    tail = (text or "")[-600:]
+    return bool(PUSH_QUESTION_RE.search(tail))
+
+
+def last_assistant_text(transcript_path, max_bytes=200000):
+    """Text of the last assistant message in a Claude Code transcript (JSONL), '' when unknown."""
+    try:
+        with open(transcript_path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - max_bytes))
+            raw = fh.read().decode("utf-8", "replace")
+    except Exception:
+        return ""
+    for line in reversed(raw.splitlines()):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        msg = rec.get("message") if isinstance(rec, dict) else None
+        if rec.get("type") == "assistant" and isinstance(msg, dict):
+            parts = msg.get("content")
+            if isinstance(parts, list):
+                return "\n".join(p.get("text", "") for p in parts
+                                 if isinstance(p, dict) and p.get("type") == "text")
+            return parts if isinstance(parts, str) else ""
+    return ""
+
+
+def has_pending_work(status_text):
+    """True for `git status -sb` output with changed files or commits ahead of upstream. Pure."""
+    lines = (status_text or "").splitlines()
+    if not lines:
+        return False
+    if "[ahead" in lines[0]:
+        return True
+    return any(l[:2] != "??" for l in lines[1:] if l.strip())
+
+
+def push_gate_reason(hook, status_text, last_text):
+    """The block reason for the Stop hook, or None. Never blocks twice in a row (stop_hook_active)."""
+    if hook.get("stop_hook_active"):
+        return None
+    if not (asks_about_push(last_text) and has_pending_work(status_text)):
+        return None
+    return ("ZASADY 2.10/2.11 (twarde): nie pytaj o push. Uzupelnij notatke sesji (1.1), commit i push "
+            "przez bramki G1-G5 (python monitor/auto_sync.py albo recznie wg 2.8), zweryfikuj wg 2.2. "
+            "Gdy bramka nie trzyma, powiedz wprost, czego brakuje -- bez pytania.")
+
+
+def git_status_short(root):
+    try:
+        out = subprocess.run(["git", "-C", root, "status", "-sb"], capture_output=True, timeout=8)
+        return out.stdout.decode("utf-8", "replace")
+    except Exception:
+        return ""
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--event", required=True, choices=EVENTS)
@@ -724,6 +805,17 @@ def main(argv=None):
     if args.event in ("stop", "stop_failure") and should_autosync(duration, autosync_min_s(cfg)):
         if spawn_auto_sync(repo_root(hook.get("cwd") or os.getcwd())):
             log("auto-sync spawned after a %.0f s task" % duration)
+
+    if args.event == "stop":
+        try:
+            reason = push_gate_reason(
+                hook, git_status_short(repo_root(hook.get("cwd") or os.getcwd())),
+                last_assistant_text(hook.get("transcript_path") or ""))
+            if reason:
+                log("push question blocked: Stop returned to the model")
+                print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=True))
+        except Exception as e:  # the gate must never break the session
+            log("push gate failed: %r" % (e,))
 
     if args.event == "session_start":  # first window on the machine starts the phone-question worker
         cwd0 = hook.get("cwd") or os.getcwd()
