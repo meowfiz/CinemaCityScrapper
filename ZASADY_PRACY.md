@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.28 (2026-10-22). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.29 (2026-10-22). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -218,6 +218,17 @@ sprawdź, czy ten projekt nie ma już trwającego przerzutu (dwa procesy w jeden
 paczce 2,4 GB (0,24 MB/s przez przekaźnik DERP: godziny, więc wznawianie jest obowiązkowe; kontrola rozmiaru
 wykryła dwa procesy piszące do jednego pliku); hub miał już spisy i paczki na dysk (`--check`, `--pack`),
 brakowało transportu.
+
+**2.14 Naprawa usługi działającej na kilku maszynach jest skończona dopiero po sprawdzeniu wersji na każdej.**
+Po zmianie kodu usługi (relay okien, bramka głosowa, workery) Claude sprawdza **na każdej maszynie, na której
+usługa chodzi**: że klon ma commit z poprawką, że **proces został wystartowany po zmianie pliku** (tabela
+`monitor/services.py` nie pokazuje „STARY KOD”; bramka: zgodny `X-Gateway-Version`) oraz robi pomiar na
+**dwóch urządzeniach naraz**, gdy błąd dotyczy kolejki lub współdzielonego stanu. Raport mówi wprost, które
+maszyny sprawdzono; „zmierzone tu” nie znaczy „działa u użytkownika”. Restart tylko usługi, której dotyczy
+zmiana (`--restart --only <usługa>`), nigdy VCC bez uzgodnienia. *Dlaczego:* 2026-10-22 poprawki głosu
+z 21.10 działały na komputerze domowym, a relay w pracy (okno RibnXtr2026) chodził na starym kodzie:
+powtórki linii i cisza w telefonie wróciły jako „błąd, którego miało nie być”, bo test miał jedną stronę
+i jedną maszynę.
 
 ---
 
@@ -521,7 +532,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.29 | 2026-10-22 | Reguła 2.14: naprawa usługi na kilku maszynach kończy się sprawdzeniem wersji na każdej (commit, proces startowany po zmianie pliku, `X-Gateway-Version`, pomiar na dwóch urządzeniach naraz). *Skąd:* relay w pracy chodził na starym kodzie, poprawki głosu z 21.10 nie dotarły do okna RibnXtr2026; decyzja użytkownika 2026-10-22. |
 | 1.28 | 2026-10-22 | Reguła 6.4: PDF-y literatury w `project_files/run_files/literatura_pdf/`, indeks `notes/literatura/index.json` (+ generowany `INDEX.md`) przez `tools/literatura.py` i skill `literatura`; pole `lib` dla wspólnej literatury; `.claude/baza.json` w repo publikacyjnym. *Skąd:* decyzja użytkownika 2026-10-22 (publikacje „z automatu”, JK jako repo publikacyjne). |
-| 1.27 | 2026-10-21 | Reguła 1.6: checkpoint po każdym podzadaniu — sekcja `## W trakcie (checkpoint)` nadpisywana na bieżąco, chroni przed utratą stanu przy kompaktowaniu kontekstu w środku sesji. Szablon notatki sesji w 1.1 rozszerzony o tę sekcję. *Skąd:* prośba użytkownika 2026-10-21 o profesjonalne rozwiązanie problemu kompaktowania kontekstu we wszystkich projektach. |
 
 Starsze wpisy (pełna tabela 1.0–1.27): `project_integration/notes/ZASADY_HISTORIA.md`.
