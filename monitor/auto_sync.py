@@ -213,6 +213,13 @@ def deleted_rows(name_status: str) -> list:
     return [ln for ln in name_status.splitlines() if ln[:1] == "D"]
 
 
+def g4_passed(rc: int) -> bool:
+    """pytest exit 0 = green; 5 = "no tests collected" (an empty tests/ directory in a young
+    publication repo, 2026-10-22: publikacja---jadra-kostnienia stayed local for that). Nothing
+    else counts as green -- 1 (failures), 2 (interrupted), 3, 4 (usage) stop the push."""
+    return rc in (0, 5)
+
+
 def split_deletions(rows: list, check) -> tuple:
     """G3b (ZASADY 6.4): (allowed rows, refused rows). A deletion is allowed ONLY when `check`
     (monitor/pub_route.g3b_for) confirms the path was moved by a publication route: it is in the
@@ -415,7 +422,7 @@ def run(root, dry_run=False):
                                errors="replace", timeout=900, **QUIET_SUBPROCESS)
             tail = (t.stdout.strip().splitlines() or [""])[-1]
             report.append("G4 pytest rc=%d: %s" % (t.returncode, tail))
-            if t.returncode != 0:
+            if not g4_passed(t.returncode):
                 outcome = "local"
                 return outcome, report
         if dry_run:
