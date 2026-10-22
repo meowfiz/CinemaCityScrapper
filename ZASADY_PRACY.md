@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.27 (2026-10-21). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.28 (2026-10-22). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -378,6 +378,14 @@ konfiguracji B (LOO opublikowanej ≠ LOO hybrydy). Przy zmianie konfiguracji **
 **6.3 Cytowania zweryfikowane** (tytuł, autorzy, czasopismo, rok, DOI) przed wpisaniem;
 niezweryfikowane oznaczone „DO WERYFIKACJI", nigdy podane z pamięci jako pewne.
 
+**6.4 Literatura: PDF w ustalonym miejscu, indeks w gicie.** Kto zbiera prace albo pisze bibliografię,
+kładzie PDF w `project_files/run_files/literatura_pdf/` (poza gitem, jedzie przez 2.13) i dopisuje wpis
+do `notes/literatura/index.json` przez `tools/literatura.py --add` (skill `literatura`); `INDEX.md` jest
+generowany. Pole `lib` wskazuje projekt, w którym PDF fizycznie leży (wspólna literatura raz). Cytat bez
+wpisu w indeksie = „DO WERYFIKACJI”. Repo publikacyjne zapisuje swój kod bazowy w `.claude/baza.json`
+(repo, commit; `literatura.py --base`). *Dlaczego:* decyzja użytkownika 2026-10-22 — 50 PDF-ów JK leżało
+tylko w RibnXtr2026, a 7 repo publikacyjnych nie miało jak na nie wskazać ani odnaleźć swojego kodu.
+
 ---
 
 ## 7. Komunikacja
@@ -513,8 +521,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.28 | 2026-10-22 | Reguła 6.4: PDF-y literatury w `project_files/run_files/literatura_pdf/`, indeks `notes/literatura/index.json` (+ generowany `INDEX.md`) przez `tools/literatura.py` i skill `literatura`; pole `lib` dla wspólnej literatury; `.claude/baza.json` w repo publikacyjnym. *Skąd:* decyzja użytkownika 2026-10-22 (publikacje „z automatu”, JK jako repo publikacyjne). |
 | 1.27 | 2026-10-21 | Reguła 1.6: checkpoint po każdym podzadaniu — sekcja `## W trakcie (checkpoint)` nadpisywana na bieżąco, chroni przed utratą stanu przy kompaktowaniu kontekstu w środku sesji. Szablon notatki sesji w 1.1 rozszerzony o tę sekcję. *Skąd:* prośba użytkownika 2026-10-21 o profesjonalne rozwiązanie problemu kompaktowania kontekstu we wszystkich projektach. |
-| 1.26 | 2026-10-19 | Spojnosc regul po skroceniu pliku: 2.1 wymienia wyjatki 2.8-2.12; 2.8 mowi, ze na koniec zadania pushuje tez Claude/agent (2.10, 2.11); 7.6 ma jedno ogolne *Dlaczego* przed sekcja machine-tag; sekcja 10 opisuje podzial tabeli (tu dwie ostatnie wersje, reszta w ZASADY_HISTORIA). Bez zmiany znaczenia regul. *Skad:* raport agenta Opus po skroceniu pliku, akceptacja uzytkownika 2026-10-19. |
-| 1.25 | 2026-10-19 | Skrocenie pliku ponizej limitu 40 000 znakow (ostrzezenie Claude Code): historia wersji i rozszerzone uzasadnienia przeniesione do notes/ZASADY_HISTORIA.md, tresc bez zmian. *Skad:* ostrzezenie uzytkownika o dlugosci pliku. |
 
-Starsze wpisy (pełna tabela 1.0–1.25): `project_integration/notes/ZASADY_HISTORIA.md`.
+Starsze wpisy (pełna tabela 1.0–1.27): `project_integration/notes/ZASADY_HISTORIA.md`.
