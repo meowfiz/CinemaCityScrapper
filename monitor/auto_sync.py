@@ -17,6 +17,9 @@ Guards -- ALL must hold, the first failure stops the run and is written to the r
       .cursor/, CLAUDE.md, ZASADY_PRACY.md, .gitignore) -- other untracked files are left alone and
       listed in the report, never added;
   G3  after the commit, `git diff --name-status <upstream>...HEAD` has zero 'D' rows (rule 2.7);
+  G3b only in a repo with .claude/pub_routes.json: a 'D' row is accepted when monitor/pub_route.py
+      moved that file (target repo's notes/MIGRACJA_log.md has it with SHA-256 and the target file
+      has that SHA now); every other 'D' still stops the push. pub_route runs BEFORE the gates;
   G4  `python -m pytest -q project_files/python/tests` is green (rule 4.4);
   G5  after `git fetch`, the upstream is an ancestor of HEAD (nobody pushed from the other machine;
       otherwise commit stays local and the report says so -- never pull/rebase/force automatically).
@@ -210,6 +213,35 @@ def deleted_rows(name_status: str) -> list:
     return [ln for ln in name_status.splitlines() if ln[:1] == "D"]
 
 
+def split_deletions(rows: list, check) -> tuple:
+    """G3b (ZASADY 6.4): (allowed rows, refused rows). A deletion is allowed ONLY when `check`
+    (monitor/pub_route.g3b_for) confirms the path was moved by a publication route: it is in the
+    target repo's migration log with its SHA-256 and the target file has that SHA now. Without a
+    routes file there is no check and every deletion is refused -- G3 as before."""
+    if not rows:
+        return [], []
+    if check is None:
+        return [], list(rows)
+    paths = [r.split("\t", 1)[1] if "\t" in r else r[1:].strip() for r in rows]
+    allowed, _refused = check(paths)
+    ok = set(allowed)
+    return ([r for r, p in zip(rows, paths) if p in ok], [r for r, p in zip(rows, paths) if p not in ok])
+
+
+def _pub_route_module(root):
+    """monitor/pub_route.py next to this file, only when the repo declares routes; else None."""
+    if not os.path.exists(os.path.join(root, ".claude", "pub_routes.json")):
+        return None
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    try:
+        import pub_route
+        return pub_route
+    except Exception:  # noqa: BLE001 - no module = no routes = G3 as before
+        return None
+
+
 def decide(entries: list, last_commit_paths: list, today: str, allow=None, files=None,
            need_note=True) -> tuple:
     """(action, reason, classification). action: 'commit' | 'push-only' | 'skip'.
@@ -301,6 +333,19 @@ def run(root, dry_run=False):
         if not upstream:
             report.append("skip: no upstream for %s" % branch)
             return outcome, report
+        pr = _pub_route_module(root)
+        if pr is not None:
+            # publication routes BEFORE the gates: files moved out are committed (removal) here,
+            # and G3b below accepts exactly those removals (ZASADY 6.4)
+            try:
+                if dry_run:
+                    plan = pr.build_plan(root, pr.load_cfg(root), pr.load_repo_map())
+                    report.append("pub_route (dry-run): %d plikow na trasach" % len(plan))
+                else:
+                    _s, lines = pr.apply(root, push=True)
+                    report.extend(lines[:12])
+            except Exception as e:  # noqa: BLE001 - a broken route must not stop the session sync
+                report.append("pub_route: blad %r -- pliki zostaja tutaj" % (e,))
         entries = parse_status(git(STATUS_ARGS, root, check=True, raw=True))
         last_paths = git(["show", "--pretty=format:", "--name-only", "HEAD"], root).splitlines()
         action, reason, c = decide(entries, last_paths, today, cfg["allow"], cfg["files"], cfg["note"])
@@ -351,6 +396,10 @@ def run(root, dry_run=False):
                 return outcome, report
         dels = deleted_rows(git(["diff", "--name-status", "%s...HEAD" % upstream], root))
         if dels:
+            allowed, dels = split_deletions(dels, (lambda ps: pr.g3b_for(root, ps)) if pr is not None else None)
+            if allowed:
+                report.append("G3b usuniecia z logiem migracji i plikiem w celu: %d" % len(allowed))
+        if dels:
             report.append("G3 deletions vs upstream (%d): %s" % (len(dels), "; ".join(dels[:5])))
             outcome = "local"
             return outcome, report
@@ -379,6 +428,8 @@ def run(root, dry_run=False):
         ok = bool(remote) and remote[0] == head
         report.append("pushed; ls-remote %s HEAD" % ("==" if ok else "!="))
         outcome = "pushed" if ok else "local"
+        if ok and not dry_run:
+            _sync_pack(root, report)
         return outcome, report
     except Exception as e:  # never break a session end
         report.append("error: %r" % (e,))
@@ -412,6 +463,26 @@ def rebase_onto_upstream(root):
     if not ok:
         git(["rebase", "--abort"], root)  # harmless when no rebase is in progress
     return ok, note
+
+
+def _sync_pack(root, report):
+    """After push: rebuild local inventory so other machines see fresh data (design sync-cross-machine).
+    sync.py is in project_integration/tools/ -- look there first, then next to root."""
+    candidates = [
+        os.path.join(root, "tools", "sync.py"),
+        os.path.join(os.path.dirname(root), "project_integration", "tools", "sync.py"),
+    ]
+    sync_py = next((p for p in candidates if os.path.exists(p)), None)
+    if not sync_py:
+        return
+    try:
+        r = subprocess.run([sys.executable, sync_py, "pack"], cwd=root, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=180,
+                           **QUIET_SUBPROCESS)
+        last = (r.stdout.strip().splitlines() or ["(brak wyjscia)"])[-1]
+        report.append("sync pack rc=%d: %s" % (r.returncode, last[:80]))
+    except Exception as exc:
+        report.append("sync pack: blad %r" % (exc,))
 
 
 def spawn_detached(root):
