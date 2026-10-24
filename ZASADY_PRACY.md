@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.29 (2026-10-22). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.30 (2026-10-24). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -229,6 +229,13 @@ zmiana (`--restart --only <usługa>`), nigdy VCC bez uzgodnienia. *Dlaczego:* 20
 z 21.10 działały na komputerze domowym, a relay w pracy (okno RibnXtr2026) chodził na starym kodzie:
 powtórki linii i cisza w telefonie wróciły jako „błąd, którego miało nie być”, bo test miał jedną stronę
 i jedną maszynę.
+
+**2.15 Konflikt małego pliku danych nie zatrzymuje przerzutu.** Plik do 20 MB, który różni się po obu stronach,
+zostaje na miejscu, a przychodząca wersja ląduje obok jako `<plik>.konflikt-<maszyna>-<sha8>`; przerzut idzie dalej,
+raport wypisuje `KOPIA KONFLIKTU`. Większy plik nadal kończy przerzut błędem. Kopie wypisuje `transfer.py --konflikty`,
+rozstrzyga człowiek (`project_integration/notes/ROZWIAZYWANIE_KONFLIKTOW.md`); kopie nie jadą z powrotem.
+*Dlaczego:* decyzja użytkownika 2026-10-24 — jeden różniący się `book.json` oznaczał każdy przerzut jako błąd,
+a ważne pliki i tak idą przez repo, więc kwestią są tylko dane.
 
 ---
 
@@ -532,7 +539,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.30 | 2026-10-24 | Reguła 2.15: konflikt małego (do 20 MB) pliku danych zostawia kopię `<plik>.konflikt-<maszyna>-<sha8>` zamiast zatrzymywać przerzut; `transfer.py --konflikty`, instrukcja `notes/ROZWIAZYWANIE_KONFLIKTOW.md`. *Skąd:* decyzja użytkownika 2026-10-24. |
 | 1.29 | 2026-10-22 | Reguła 2.14: naprawa usługi na kilku maszynach kończy się sprawdzeniem wersji na każdej (commit, proces startowany po zmianie pliku, `X-Gateway-Version`, pomiar na dwóch urządzeniach naraz). *Skąd:* relay w pracy chodził na starym kodzie, poprawki głosu z 21.10 nie dotarły do okna RibnXtr2026; decyzja użytkownika 2026-10-22. |
-| 1.28 | 2026-10-22 | Reguła 6.4: PDF-y literatury w `project_files/run_files/literatura_pdf/`, indeks `notes/literatura/index.json` (+ generowany `INDEX.md`) przez `tools/literatura.py` i skill `literatura`; pole `lib` dla wspólnej literatury; `.claude/baza.json` w repo publikacyjnym. *Skąd:* decyzja użytkownika 2026-10-22 (publikacje „z automatu”, JK jako repo publikacyjne). |
 
 Starsze wpisy (pełna tabela 1.0–1.27): `project_integration/notes/ZASADY_HISTORIA.md`.
