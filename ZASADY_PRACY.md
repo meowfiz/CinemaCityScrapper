@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.30 (2026-10-24). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.33 (2026-10-27). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -237,6 +237,15 @@ rozstrzyga człowiek (`project_integration/notes/ROZWIAZYWANIE_KONFLIKTOW.md`); 
 *Dlaczego:* decyzja użytkownika 2026-10-24 — jeden różniący się `book.json` oznaczał każdy przerzut jako błąd,
 a ważne pliki i tak idą przez repo, więc kwestią są tylko dane.
 
+**2.16 Tytuł commita mówi, co zrobiono; `start` mówi, kto i kiedy ostatnio.** Tytuł commita to **jedno
+lakoniczne zdanie zrozumiałe dla użytkownika**: co zostało zrobione i po co, bez nazw funkcji tam, gdzie
+wystarczy opis („Okna wracają same po restarcie Windows”, nie „okna_tick + desk flag”); ASCII jak w 4.1,
+szczegóły w treści. Każdy commit dostaje stopkę `Maszyna: <nazwa>` (hook `prepare-commit-msg` instalowany
+przez `start` raz na maszynę, `core.hooksPath = ~/.claude/git-hooks`). Skill `start` kończy się linią
+z `tools/last_commit.py`: kiedy był ostatni commit projektu, z której maszyny, kto i z jakim tytułem.
+*Dlaczego:* decyzja użytkownika 2026-10-27 — po „start” ma od razu wiedzieć, kiedy, gdzie i co ostatnio
+zrobiono w projekcie; git nie zapisuje maszyny, a autor jest na obu ten sam.
+
 ---
 
 ## 3. Specyfikacja i planowanie
@@ -380,6 +389,16 @@ przypadków, odpowiedzią są dane (anotacja), nie kolejna cecha.
 być sensowne, żeby recenzenci nie podważyli nic." Każde twierdzenie w figurze i tekście ma pomiar
 za sobą; jawne granice („bez kontroli A+A' nie da się rozdzielić…") są częścią wyniku.
 
+**5.15 Nigdy nie zgaduj przyczyny — najpierw zmierz.** Zanim postawisz diagnozę albo podejmiesz
+działanie z niej wynikające (restart usługi, „pewnie X", „to przez Y"), zmierz stan: jeśli coś da
+się zmierzyć jednym poleceniem, zmierz to i dopiero wtedy mów, co z tego wynika — `nvidia-smi`,
+czas z **unikalnym** wejściem omijającym cache, logi, tabela stanu, probe end-to-end. *Dlaczego:*
+2026-10-25 „wolny render VCC = zwieszony worker GPU, restart" było zgadywaniem; pomiar util GPU
+podczas renderu pokazał 80–99% przez cały czas = kontencja na współdzielonej karcie (~36 procesów),
+nie zwis — restart niczego by nie naprawił. Rozszerza 5.2 (mierz, nie oceniaj okiem) i 1.2 (liczby,
+nie przymiotniki) na **fazę diagnozy**, zanim cokolwiek się zmieni. Polecenie użytkownika
+2026-10-25: „nigdy nie zgaduj".
+
 ---
 
 ## 6. Prowenienecja
@@ -461,13 +480,17 @@ postać `Glosowo-NAME:` z tym samym identyfikatorem. Przeglądarka odtwarza tylk
 z własnym `NAME` — inne urządzenia ich nie słyszą. Nietagowane `Glosowo:` gra na wszystkich.
 *Dlaczego:* bez tagu PC grał odpowiedzi wysłane z telefonu i odwrotnie (broadcast 2026-10-14).
 
-**7.7 Mail wychodzi tylko na wyraźną prośbę.** Wysyłka przez skill `mail`
-(`project_integration/tools/send_mail.py`, Gmail): do siebie (`--to self`) od razu; do kogokolwiek
-innego **najpierw adresat, temat i treść do akceptacji**, dopiero po „tak" `--potwierdzone`. Hasło
-tylko w Menedżerze poświadczeń Windows (`--set-password` w zwykłej konsoli) — nigdy w pliku, repo
-ani w rozmowie; limit dzienny, załączniki tylko z katalogu projektu. *Dlaczego:* decyzja
-użytkownika 2026-10-11 („chcę móc wysłać maila z okien"); mail do osoby trzeciej jest
-nieodwracalny i publikuje treść poza nasze systemy.
+**7.7 Mail wychodzi tylko na wyraźną prośbę — ale „wyślij maila" znaczy wyślij od razu.** Wysyłka
+przez skill `mail` (`project_integration/tools/send_mail.py`, Gmail). Gdy użytkownik mówi „wyślij
+maila" (albo równoważne), Claude **wysyła od razu, bez dopytywania „Wysłać?"** — każdy adresat, także
+osoba trzecia (`--to self` bez flagi; inny adresat z `--potwierdzone`, która jest teraz realizacją
+polecenia, nie obejściem). Potem jedno zdanie: co poszło, do kogo, z jakim tematem. Draft „do
+akceptacji" pokazuje się **tylko** gdy użytkownik poprosi albo powie „poczekaj / wstrzymaj do
+akceptacji". Hasło tylko w Menedżerze poświadczeń Windows (`--set-password` w zwykłej konsoli) — nigdy
+w pliku, repo ani w rozmowie; limit dzienny, załączniki tylko z katalogu projektu. *Dlaczego:* decyzja
+użytkownika 2026-10-11 („chcę móc wysłać maila z okien"); 2026-10-25 (powtórzona, zniecierpliwiony
+„po raz kolejny"): zlecenie wysłania jest zleceniem wykonania — zgoda jest założona, wstrzymanie na
+wyraźne życzenie. Wyjątki bezpieczeństwa (sekrety, limit, katalog, hasło) zostają.
 
 **7.8 Zadanie dłuższe niż 2 minuty dostaje stempel czasowy.** Pierwsza linia odpowiedzi: `[HH:MM]`
 (sam czas startu). Ostatnia linia odpowiedzi: `[HH:MM→HH:MM · Nm]` (start→koniec + czas trwania;
@@ -539,7 +562,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
-| 1.30 | 2026-10-24 | Reguła 2.15: konflikt małego (do 20 MB) pliku danych zostawia kopię `<plik>.konflikt-<maszyna>-<sha8>` zamiast zatrzymywać przerzut; `transfer.py --konflikty`, instrukcja `notes/ROZWIAZYWANIE_KONFLIKTOW.md`. *Skąd:* decyzja użytkownika 2026-10-24. |
-| 1.29 | 2026-10-22 | Reguła 2.14: naprawa usługi na kilku maszynach kończy się sprawdzeniem wersji na każdej (commit, proces startowany po zmianie pliku, `X-Gateway-Version`, pomiar na dwóch urządzeniach naraz). *Skąd:* relay w pracy chodził na starym kodzie, poprawki głosu z 21.10 nie dotarły do okna RibnXtr2026; decyzja użytkownika 2026-10-22. |
+| 1.33 | 2026-10-27 | Reguła 2.16: tytuł commita = jedno zrozumiałe zdanie o zrobionej pracy; stopka `Maszyna:` w każdym commicie (hook maszyny z `start`); `start` kończy się ostatnim commitem projektu (kiedy, maszyna, kto, tytuł; `tools/last_commit.py`). *Skąd:* decyzja użytkownika 2026-10-27. |
+| 1.32 | 2026-10-25 | Reguła 7.7: „wyślij maila" = wyślij od razu, bez dopytywania „Wysłać?", każdy adresat; draft do akceptacji tylko na wyraźne „poczekaj". Skill `mail` reguła 2 zmieniona. *Skąd:* polecenie użytkownika 2026-10-25 (powtórzone, „po raz kolejny"). |
 
-Starsze wpisy (pełna tabela 1.0–1.27): `project_integration/notes/ZASADY_HISTORIA.md`.
+Starsze wpisy (pełna tabela 1.0–1.31): `project_integration/notes/ZASADY_HISTORIA.md`.
