@@ -47,6 +47,10 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import repo_touch  # noqa: E402
 import taskparse  # noqa: E402
+# Child processes of hooks and pythonw services must not open console windows (2026-10-28: every file
+# operation flashed a window and made the computer unusable). In a visible terminal output stays there.
+_NOWIN = ({"creationflags": 0x08000000}
+          if os.name == "nt" and not (getattr(sys.stdout, "isatty", None) and sys.stdout.isatty()) else {})
 
 EVENTS = ("session_start", "prompt", "tool", "stop", "stop_failure", "waiting", "session_end",
           "label", "progress", "unpushed")
@@ -123,7 +127,7 @@ def git(args, cwd):
         out = subprocess.run(
             ["git"] + args, cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=3
-        )
+        , **_NOWIN)
         if out.returncode != 0:
             return None
         return out.stdout.strip()
@@ -241,7 +245,7 @@ def spawn_auto_sync(root):
         return False
     try:
         subprocess.run([sys.executable, script, "--root", root, "--spawn"],
-                       cwd=root, capture_output=True, timeout=5)
+                       cwd=root, capture_output=True, timeout=5, **_NOWIN)
         return True
     except Exception as e:
         log("auto-sync spawn failed: %r" % (e,))
@@ -431,7 +435,7 @@ def spawn_agent_tick(session_id, cwd):
         return False
     try:
         subprocess.run([sys.executable, script, "--session", str(session_id or "nosession"),
-                        "--cwd", cwd, "--spawn"], cwd=cwd, capture_output=True, timeout=5)
+                        "--cwd", cwd, "--spawn"], cwd=cwd, capture_output=True, timeout=5, **_NOWIN)
         return True
     except Exception as e:
         log("agent tick spawn failed: %r" % (e,))
@@ -473,7 +477,7 @@ def rtk_tokens(cwd):
         out = subprocess.run(
             [exe, "gain", "--project", "--format", "json"],
             cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
-        )
+         **_NOWIN)
         if out.returncode != 0:
             return None
         summ = json.loads(out.stdout).get("summary") or {}
@@ -734,7 +738,7 @@ def heal_unpushed(rows, root):
             continue
         try:
             subprocess.run([sys.executable, os.path.join(path, "monitor", "auto_sync.py"),
-                            "--root", path, "--spawn"], cwd=path, capture_output=True, timeout=5)
+                            "--root", path, "--spawn"], cwd=path, capture_output=True, timeout=5, **_NOWIN)
         except Exception as e:
             log("unpushed heal %s failed: %r" % (path, e))
 
@@ -816,7 +820,7 @@ def push_gate_reason(hook, status_text, last_text):
 
 def git_status_short(root):
     try:
-        out = subprocess.run(["git", "-C", root, "status", "-sb"], capture_output=True, timeout=8)
+        out = subprocess.run(["git", "-C", root, "status", "-sb"], capture_output=True, timeout=8, **_NOWIN)
         return out.stdout.decode("utf-8", "replace")
     except Exception:
         return ""
