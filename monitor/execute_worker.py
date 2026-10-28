@@ -150,6 +150,10 @@ def is_protected(branch):
     return (branch or "").strip().lower() in PROTECTED_BRANCHES
 
 
+TOOL_DIRS = (".agents/", ".codex/")
+TOOL_FILES = ("AGENTS.md",)
+
+
 def dirty_lines(status_porcelain):
     """Porcelain lines that count as somebody's work in progress.
 
@@ -175,6 +179,10 @@ def dirty_lines(status_porcelain):
             continue
         untracked = line[:2] == "??"
         if untracked and (path.startswith(BLOCKED_PREFIXES) or path.endswith(BLOCKED_SUFFIXES)):
+            continue
+        # Untracked config of another coding tool, present in most clones since 2026-10-28; nobody's work in
+        # progress, and it blocked mail order 180's retry on the work PC.
+        if untracked and (path.startswith(TOOL_DIRS) or path in TOOL_FILES):
             continue
         out.append(line)
     return out
@@ -514,6 +522,9 @@ def run_item(repo_path, item, agent=None, git_runner=None, flags=None, timeout=A
 
         git(["add", "-A"], repo_path, runner=git_runner)
         git(["reset", "-q", "--", FLAGS_FILE], repo_path, runner=git_runner)  # never commit the switch
+        for tool_path in TOOL_DIRS + TOOL_FILES:   # another tool's untracked config is not this order's work
+            if not git_out(["ls-files", "--", tool_path.rstrip("/")], repo_path, git_runner).strip():
+                git(["reset", "-q", "--", tool_path.rstrip("/")], repo_path, runner=git_runner)
         staged = git_out(["diff", "--cached", "--name-status"], repo_path, git_runner)
         junk = artifacts(staged) + empty_additions(staged, repo_path)
         if junk:
