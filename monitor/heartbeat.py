@@ -679,27 +679,75 @@ def get_from(url, token, path):
         return json.loads(resp.read().decode("utf-8", "replace"))
 
 
-def unpushed_lines(rows):
+def same_machine(a, b):
+    """'DESKTOP-GEIH38C' (MONITOR_MACHINE) and 'GEIH38C' (commit trailers) are one PC. Pure."""
+    def n(s):
+        return re.sub(r"^DESKTOP-", "", str(s or "").strip().upper())
+    return bool(n(a)) and n(a) == n(b)
+
+
+def split_unpushed(rows, here, repo):
+    """-> (warn, heal). warn: rows of THIS repo only (any machine) -- the session that can fix them.
+    heal: every row on this machine -- auto-sync can push it from here, so nobody has to ask.
+    Other repos on other machines are left to their own sessions. 2026-10-28: a `start` in Dashboard
+    warned about vESSA and project_integration on the same PC with "stad nie da sie tego wypchnac". Pure."""
+    rows = [r for r in rows or [] if int(r.get("ahead") or 0) > 0]
+    warn = [r for r in rows if r.get("repo") == repo]
+    heal = [r for r in rows if same_machine(r.get("machine"), here)]
+    return warn, heal
+
+
+def unpushed_lines(rows, here=None):
     """The SessionStart warning, one line per machine+repo, or [] when nothing is stranded. Pure."""
     out = []
     for r in rows or []:
         why = r.get("reason") or r.get("result") or "brak pushu"
+        where = "ta maszyna" if here and same_machine(r.get("machine"), here) else r.get("machine")
         out.append("- %s: %s -- %d commit(y) tylko lokalnie na galezi %s (od %s; %s)"
-                   % (r.get("machine"), r.get("repo"), int(r.get("ahead") or 0),
+                   % (where, r.get("repo"), int(r.get("ahead") or 0),
                       r.get("branch") or "?", str(r.get("since") or "?")[:16], str(why)[:90]))
     if out:
         out.insert(0, "UWAGA -- powiedz to uzytkownikowi na poczatku odpowiedzi: niewypchniete "
-                      "commity (praca niewidoczna z innych maszyn):")
-        out.append("Na tamtej maszynie: notatka sesji + `python monitor/auto_sync.py` albo "
-                   "naprawa testow (ZASADY 2.8); stad nie da sie tego wypchnac.")
+                      "commity tego projektu (praca niewidoczna z innych maszyn):")
+        if all(here and same_machine(r.get("machine"), here) for r in rows):
+            out.append("Auto-sync tego repo wlasnie ruszyl w tle; jesli znow zostanie lokalnie, "
+                       "napraw w tej sesji bramke z powodu wyzej (ZASADY 2.8).")
+        else:
+            out.append("Na tamtej maszynie: notatka sesji + `python monitor/auto_sync.py` albo "
+                       "naprawa testow (ZASADY 2.8); stad nie da sie tego wypchnac.")
     return out
+
+
+def heal_path(row, root):
+    """Local clone of a same-machine row: the reported path, else a sibling of this repo. Pure."""
+    for p in (row.get("path"), os.path.join(os.path.dirname(root), str(row.get("repo") or ""))):
+        if p and os.path.isfile(os.path.join(p, "monitor", "auto_sync.py")):
+            return p
+    return None
+
+
+def heal_unpushed(rows, root):
+    """Start each stranded repo's own auto_sync (its gates, its config), detached."""
+    for r in rows:
+        path = heal_path(r, root)
+        if not path:
+            continue
+        try:
+            subprocess.run([sys.executable, os.path.join(path, "monitor", "auto_sync.py"),
+                            "--root", path, "--spawn"], cwd=path, capture_output=True, timeout=5)
+        except Exception as e:
+            log("unpushed heal %s failed: %r" % (path, e))
 
 
 def warn_unpushed(cfg, url, token, cwd):
     try:
         root = repo_root(cwd)
+        here = cfg.get("MONITOR_MACHINE") or platform.node()
         report_unpushed(cfg, url, token, root, repo_name(cwd))
-        lines = unpushed_lines(get_from(url, token, "/api/repos/unpushed").get("unpushed"))
+        rows = get_from(url, token, "/api/repos/unpushed").get("unpushed")
+        warn, heal = split_unpushed(rows, here, repo_name(cwd))
+        heal_unpushed(heal, root)
+        lines = unpushed_lines(warn, here)
         if lines:
             print("\n".join(lines))
     except Exception as e:
