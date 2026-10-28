@@ -621,6 +621,36 @@ def with_outcome(answer, **kwargs):
     return (said + "\n\n" + tail) if said else tail
 
 
+# 2026-10-28 (user): an order for dashboard-M must read new data from the home disk (Z:\Mariolka), run the
+# project's scripts on it and leave the result there. The repository declares that itself, so a repo
+# without the file keeps exactly the old, repo-only permissions.
+DATA_CFG_REL = os.path.join(".claude", "dane.json")
+
+
+def data_access(repo_path, isdir=os.path.isdir):
+    """(extra_dirs, extra_allow, note) from <repo>/.claude/dane.json, e.g.
+    {"dirs": ["Z:\\\\Mariolka", "/mnt/z/Mariolka"], "scripts": ["python tools/", "node app/scripts/"]}.
+    Only directories that exist here count (one entry per OS); each script prefix becomes
+    Bash(<prefix>:*) plus the rtk spelling the hook rewrites it to. No file or bad JSON -> nothing."""
+    try:
+        with open(os.path.join(repo_path, DATA_CFG_REL), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        return [], [], ""
+    dirs = [d for d in (cfg.get("dirs") or []) if isinstance(d, str) and d and isdir(d)]
+    allow = []
+    for pre in cfg.get("scripts") or []:
+        pre = " ".join(str(pre).split())
+        if pre and not pre.startswith(("git", "rtk git", "gh")):
+            allow += ["Bash(%s:*)" % pre, "Bash(rtk %s:*)" % pre]
+    note = ""
+    if dirs:
+        note = ("Dane projektu (poza repozytorium) leza w: %s. Czytaj je tam i tam zapisuj wyniki, "
+                "w nowym podkatalogu z data; nie usuwaj ani nie nadpisuj istniejacych plikow danych."
+                % ", ".join(dirs))
+    return dirs, allow, note
+
+
 def _run_agent(repo_path, item, agent, timeout):
     """The model gets Write/Edit but no git: commits are the system's decision, not the model's.
 
@@ -633,8 +663,10 @@ def _run_agent(repo_path, item, agent, timeout):
     """
     if agent is not None:
         return agent(repo_path, item)
-    return ask_core.ask([repo_path], item.get("text") or "", system=AGENT_SYSTEM,
-                        timeout=timeout, allow=AGENT_ALLOW, deny=AGENT_DENY, use_digest=True,
+    dirs, extra_allow, note = data_access(repo_path)
+    return ask_core.ask([repo_path] + dirs, item.get("text") or "",
+                        system=(AGENT_SYSTEM + " " + note) if note else AGENT_SYSTEM,
+                        timeout=timeout, allow=AGENT_ALLOW + extra_allow, deny=AGENT_DENY, use_digest=True,
                         thread_id=item.get("thread_id"),
                         first_turn=bool(item.get("thread_new", 1)))
 
