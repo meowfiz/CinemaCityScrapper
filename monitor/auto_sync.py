@@ -46,7 +46,9 @@ QUIET_SUBPROCESS = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == 
 
 ALLOWED_PREFIXES = ("notes/", "openspec/", "project_files/python/", "monitor/", ".cursor/", ".claude/")
 ALLOWED_FILES = ("CLAUDE.md", "ZASADY_PRACY.md", ".gitignore")
-BLOCKED_PREFIXES = ("project_files/run_files/", "notes/user_tasks/")
+# .claude/worktrees/: an Agent worktree (its own checkout) sits under the allowlisted .claude/ and was
+# picked as "1 path to commit" in vESSA, 2026-10-28 -- never commit another checkout into the repo.
+BLOCKED_PREFIXES = ("project_files/run_files/", "notes/user_tasks/", ".claude/worktrees/")
 BLOCKED_SUFFIXES = (".log", ".tmp", ".pyc", ".pyo")
 NOTE_DIR = "notes/sesje/"
 # --untracked-files=all: plain `git status --porcelain` collapses a NEW directory to one row
@@ -461,14 +463,71 @@ def git_rc(args, cwd):
     return r.returncode, r.stdout
 
 
+# Files where conflicts are always resolvable without human input:
+#   notes/start.md  -- current-state file; upstream wins (newer session always on the pushing machine)
+#   .gitignore      -- additive; keep all lines from both sides
+_AUTO_RESOLVE_THEIRS = {"notes/start.md"}
+_AUTO_RESOLVE_SUM = {".gitignore"}
+
+
+def _merge_conflict_sum(text):
+    """Remove conflict markers keeping unique lines from both sides (for additive files)."""
+    out = []
+    seen = set()
+    skip = False
+    for line in text.splitlines(keepends=True):
+        if line.startswith("<<<<<<<") or line.startswith("=======") or line.startswith(">>>>>>>"):
+            skip = False
+            continue
+        if line not in seen:
+            seen.add(line)
+            out.append(line)
+    return "".join(out)
+
+
+def _try_auto_resolve(root, conflicts):
+    """Resolve known conflict patterns in-place; returns (resolved_list, remaining_list)."""
+    resolved = []
+    for path in conflicts:
+        basename = os.path.basename(path)
+        full = os.path.join(root, path)
+        if path in _AUTO_RESOLVE_THEIRS or basename in _AUTO_RESOLVE_THEIRS:
+            git(["checkout", "--theirs", path], root)
+            git(["add", path], root)
+            resolved.append(path + ":theirs")
+        elif path in _AUTO_RESOLVE_SUM or basename in _AUTO_RESOLVE_SUM:
+            try:
+                with open(full, encoding="utf-8", errors="replace") as f:
+                    raw = f.read()
+                with open(full, "w", encoding="utf-8") as f:
+                    f.write(_merge_conflict_sum(raw))
+                git(["add", path], root)
+                resolved.append(path + ":sum")
+            except Exception:
+                pass
+    remaining = [c for c in conflicts if not any(c in r for r in resolved)]
+    return resolved, remaining
+
+
 def rebase_onto_upstream(root):
-    """pull --rebase --autostash, aborting cleanly on conflict so the tree is never left mid-rebase."""
+    """pull --rebase --autostash; tries to auto-resolve known conflict patterns before aborting."""
     rc, _ = git_rc(["pull", "--rebase", "--autostash"], root)
     conflicts = [ln for ln in git(["diff", "--name-only", "--diff-filter=U"], root).splitlines()
                  if ln.strip()]
-    ok, note = rebase_outcome(rc, conflicts)
+    if conflicts:
+        resolved, remaining = _try_auto_resolve(root, conflicts)
+        if resolved and not remaining:
+            rc2, _ = git_rc(["rebase", "--continue"], root)
+            if rc2 == 0:
+                return True, "pull --rebase z auto-rozwiazaniem (%s)" % ", ".join(resolved)
+            git(["rebase", "--abort"], root)
+            return False, "rebase --continue nieudany po auto-rozwiazaniu -- commit lokalny"
+        git(["rebase", "--abort"], root)
+        label = ", ".join(remaining[:3]) if remaining else ", ".join(c.split(":")[0] for c in resolved)
+        return False, "KONFLIKT przy rebase (%s) -- commit zostaje lokalny, rozwiaz recznie" % label
+    ok, note = rebase_outcome(rc, [])
     if not ok:
-        git(["rebase", "--abort"], root)  # harmless when no rebase is in progress
+        git(["rebase", "--abort"], root)
     return ok, note
 
 
