@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.34 (2026-10-29). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.35 (2026-10-29). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -214,6 +214,11 @@ z **wznawianiem** (od rozmiaru pliku po stronie zdalnej) i **SHA-256 całości**
 na drugiej maszynie **bez nadpisywania i bez usuwania** (różny plik = `KONFLIKT` w raporcie, zostaje
 nietknięty). Projekt bez deklaracji najpierw deklaruje (`--check` zgłasza `[ZADEKLARUJ]`). Przed startem
 sprawdź, czy ten projekt nie ma już trwającego przerzutu (dwa procesy w jeden plik zdalny go psują).
+**Dane przenosi wyłącznie `transfer.py --send` (skill `przerzuc`; pobranie z drugiej maszyny: `sync.py pull`,
+który zleca tamtej `--send`), nigdy kopiowanie plik po pliku przez `ssh`/`scp` z okna projektu** — tylko
+wtedy małe pliki jadą jednym zipem, a przerzut od pierwszej sekundy widać w orkiestratorze i na pulpicie
+monitora (2026-10-29: okno projektu kopiowało pliki pojedynczo z domu, migały tam okna konsoli, a przerzutu
+nigdzie nie było widać).
 *Dlaczego:* decyzja użytkownika 2026-10-18 („nie będę latał z dyskami”). vESSA pokazała mechanizm na
 paczce 2,4 GB (0,24 MB/s przez przekaźnik DERP: godziny, więc wznawianie jest obowiązkowe; kontrola rozmiaru
 wykryła dwa procesy piszące do jednego pliku); hub miał już spisy i paczki na dysk (`--check`, `--pack`),
@@ -572,7 +577,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.35 | 2026-10-29 | Reguła 2.13: dane między maszynami tylko przez `transfer.py --send` (skill `przerzuc`, pobranie: `sync.py pull` zleca drugiej maszynie `--send`), nigdy plik po pliku przez `ssh`/`scp` z okna projektu; przerzut zgłasza się serwerowi od startu (orkiestrator i pulpit monitora, sekcja Przerzuty), małe pliki jadą jednym zipem, pliki od 64 MB osobno bez kopii na dysku. *Skąd:* polecenie użytkownika 2026-10-29 (okno projektu kopiowało pliki pojedynczo z domu, przerzutu nie było widać w orkiestratorze). |
 | 1.34 | 2026-10-29 | Reguła 7.10: mail z podsumowaniem (wynik obliczeń, nowy głos, zlecenie z maila, raport okna) to kilka zdań zwykłej mowy -- co wyszło, lepiej/gorzej, problem, co dalej; najwyżej kilka rozstrzygających liczb, bez identyfikatorów, ścieżek, statystyk i logów; generatory maili z testem krótkości. *Skąd:* prośba użytkownika 2026-10-29 („przestań bombardować mnie liczbami”). |
-| 1.33 | 2026-10-27 | Reguła 2.16: tytuł commita = jedno zrozumiałe zdanie o zrobionej pracy; stopka `Maszyna:` w każdym commicie (hook maszyny z `start`); `start` kończy się ostatnim commitem projektu (kiedy, maszyna, kto, tytuł; `tools/last_commit.py`). *Skąd:* decyzja użytkownika 2026-10-27. |
 
-Starsze wpisy (pełna tabela 1.0–1.32): `project_integration/notes/ZASADY_HISTORIA.md`.
+Starsze wpisy (pełna tabela 1.0–1.33): `project_integration/notes/ZASADY_HISTORIA.md`.
