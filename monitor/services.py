@@ -105,10 +105,17 @@ def port_open(host, port, timeout=PROBE_TIMEOUT_S, connect=None):
         return False
 
 
-def spawn_detached(args, cwd=None):
-    """Start a process that outlives this one and shows no console window."""
-    kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+def spawn_detached(args, cwd=None, env=None, log=None):
+    """Start a process that outlives this one and shows no console window. `env`: extra variables.
+    `log`: path of a file the output is appended to (default: discarded)."""
+    out = subprocess.DEVNULL
+    if log:
+        os.makedirs(os.path.dirname(log), exist_ok=True)
+        out = open(log, "ab")
+    kw = {"stdin": subprocess.DEVNULL, "stdout": out, "stderr": subprocess.STDOUT if log else subprocess.DEVNULL,
           "close_fds": True, "cwd": cwd or os.path.expanduser("~")}
+    if env:
+        kw["env"] = dict(os.environ, **env)
     if os.name == "nt":
         kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     else:
@@ -193,7 +200,7 @@ def _voice_env_value(key):
     return os.environ.get(key, "")
 
 
-def gateway_state(cfg, now=None, probe=None):
+def gateway_state(cfg, now=None, probe=None, version_probe=None):
     if not os.path.exists(GATEWAY):
         return STATE_OFF, "tego repozytorium nie dotyczy (brak tools/voice_gateway.py)"
     host = gateway_bind()
@@ -207,7 +214,48 @@ def gateway_state(cfg, now=None, probe=None):
                  or ("local" if tts_engine != "chatterbox" else "none"))
     note = ("bramka glosowa na %s:%d; stt=%s whisper=%s/%s; tts=%s hosts=%s"
             % (host, GATEWAY_PORT, stt_hosts, whisper, device, tts_engine, tts_hosts))
+    # 2026-10-22: after `--restart --only voice` the old process kept the port, /health still
+    # answered with the old fingerprint and this table said "dziala". Same check as relay_stale.
+    if up and (probe is None or version_probe) and gateway_stale(host, version_probe=version_probe):
+        note = ("STARY KOD bramki (plik zmieniony po starcie): python monitor/services.py --restart "
+                "--only voice; " + note)
     return (STATE_UP if up else STATE_DOWN), note
+
+
+def _file_version(path):
+    """Same fingerprint as voice_gateway.file_version: sha256[:12], line endings normalised."""
+    import hashlib
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read().replace(b"\r\n", b"\n")
+    except OSError:
+        return None
+    return hashlib.sha256(raw).hexdigest()[:12]
+
+
+def _running_version(host):
+    """X-Gateway-Version of whatever answers /health, or None (self-signed cert accepted)."""
+    import ssl
+    import urllib.request
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    for scheme in ("https", "http"):
+        try:
+            url = "%s://%s:%d/health" % (scheme, host, GATEWAY_PORT)
+            with urllib.request.urlopen(url, timeout=3, context=ctx) as resp:
+                return resp.headers.get("X-Gateway-Version")
+        except Exception:  # noqa: BLE001 - failure = not this scheme
+            continue
+    return None
+
+
+def gateway_stale(host, version_probe=None):
+    """True only when the running gateway reports a fingerprint different from the file on disk.
+    Unknown on either side is not 'stale' (an old gateway without the header is ready.py's case)."""
+    running = (version_probe or _running_version)(host)
+    on_disk = _file_version(GATEWAY)
+    return bool(running and on_disk and running != "unknown" and running != on_disk)
 
 
 def start_ask(cfg):
@@ -369,7 +417,14 @@ def bridge_state(cfg, now=None, probe=None):
     cb = _bridge()
     if not cb.host_enabled():
         return STATE_OFF, "maszyna nie jest hostem (python tools/cli_bridge.py --apply)"
-    return (STATE_UP if cb.runtime_up() else STATE_DOWN), "okna w tmux: ssh, telefon :%d, 'do okna'" % cb.TTYD_PORT
+    up = cb.runtime_up()
+    note = "okna w tmux: ssh, telefon :%d, 'do okna'" % cb.TTYD_PORT
+    # 2026-10-22: the work PC's relay served day-old page code after a pull and the table said
+    # "dziala" -- the voice fixes never reached that window. Running != running the code on disk.
+    if up and getattr(cb, "relay_stale", None) and cb.relay_stale():
+        note = ("STARY KOD relaya (plik zmieniony po starcie): python monitor/services.py --restart "
+                "--only bridge, potem przeladuj karty okien i wlacz glosnik")
+    return (STATE_UP if up else STATE_DOWN), note
 
 
 def start_bridge(cfg):
@@ -415,23 +470,38 @@ def vcc_script(repo_map=None):
     return path if os.path.exists(path) else None
 
 
+def _vcc_disabled():
+    """True when VOICE_VCC_ENABLED=0 in ~/.claude/voice.env (per-machine opt-out, e.g. laptop)."""
+    return _voice_env_value("VOICE_VCC_ENABLED") == "0"
+
+
 def vcc_state(cfg, now=None, probe=None):
     """Serwer glosow prywatnych na 127.0.0.1:VCC_PORT. Probe tak samo jak bramka -- port otwarty
     = usluga zyje; stary pid file bez portu = DEAD."""
     if not vcc_script():
         return STATE_OFF, "ta maszyna nie ma klonu VideoContentCreator (nie dotyczy)"
+    if _vcc_disabled():
+        return STATE_OFF, "wylaczone per voice.env (VOICE_VCC_ENABLED=0); glosy z serwera lub edge-tts"
     up = port_open("127.0.0.1", VCC_PORT, connect=probe)
     return (STATE_UP if up else STATE_DOWN), "glosy prywatne na 127.0.0.1:%d (edyta_gorniak itd.); fallback: Piper" % VCC_PORT
+
+
+# Safe margin for the voice gateway (openspec/changes/voice-safe-margin, 2026-10-26): ONE voice process
+# (two held 3.6 + 3.0 GB and left 858 MiB of the 11 GB card free) whose model stays loaded (0 = never
+# idle out), so the gateway needs no keep-alive renders. The editor's own defaults stay in VCC.
+VCC_ENV = {"VCC_MAX_WORKERS": "1", "VCC_TTS_IDLE_S": "0"}
 
 
 def start_vcc(cfg, probe=None):
     script = vcc_script()
     if not script:
         return "skipped"
+    if _vcc_disabled():
+        return "disabled"
     if port_open("127.0.0.1", VCC_PORT, connect=probe):
         return "running"
     repo = vcc_repo()
-    proc = spawn_detached([quiet_interpreter(), script, "serve", "--no-browser"], cwd=repo)
+    proc = spawn_detached([quiet_interpreter(), script, "serve", "--no-browser"], cwd=repo, env=VCC_ENV)
     write_pid(VCC_LOCK, proc.pid)
     return "spawned"
 
@@ -447,13 +517,199 @@ def stop_vcc(cfg, kill=os.kill):
     return "stopped" if stopped else "not-running"
 
 
+# -- gpuwatch (pomiar bierny karty i pamieci) -------------------------------------
+# gpu_watch.py co 2 s czyta nvidia-smi (VRAM, obciazenie) i wolna pamiec zatwierdzona hosta i pisze
+# ~/.claude/gpu_state.json. Niczego nie renderuje i nie restartuje VCC (od 2026-10-26: bezpieczny
+# margines -- sonda byla praca GPU poza kolejka bramki). Bramka decyduje sama (clone_admit).
+# Lock-based liveness jak dashboards: petla dotyka locka co probke.
+GPUWATCH = os.path.join(HERE, "gpu_watch.py")
+GPUWATCH_LOCK = os.path.join(tempfile.gettempdir(), "monitor_gpu_watch.lock")
+GPUWATCH_EVERY_S = float(os.environ.get("GPU_WATCH_SAMPLE_S", "2"))
+GPUWATCH_LIVE_S = max(GPUWATCH_EVERY_S, 10.0)   # lock poll for liveness: nvidia-smi may take up to 10 s
+
+
+def gpuwatch_state(cfg, now=None, probe=None):
+    """Czujnik GPU zyje? Swiezosc locka, jak workery -- petla spiaca ~90 s nie da sie sprawdzic
+    portem. lock_is_live sam mnozy przez LOCK_STALE_POLLS (3), wiec martwy po ~3 cyklach. Nie
+    dotyczy maszyny bez VCC albo z VCC wylaczonym (nie ma czego pilnowac)."""
+    if not vcc_script():
+        return STATE_OFF, "ta maszyna nie ma VCC (nie dotyczy)"
+    if _vcc_disabled():
+        return STATE_OFF, "VCC wylaczone (VOICE_VCC_ENABLED=0)"
+    live = ask_worker.lock_is_live(GPUWATCH_LOCK, time.time() if now is None else now, GPUWATCH_LIVE_S)
+    return (STATE_UP if live else STATE_DOWN), \
+        "pomiar bierny VRAM/obciazenia/pamieci co %ds (bez renderu, bez restartu VCC)" % int(GPUWATCH_EVERY_S)
+
+
+def start_gpuwatch(cfg):
+    if not vcc_script():
+        return "skipped"
+    if _vcc_disabled():
+        return "disabled"
+    if gpuwatch_state(cfg)[0] == STATE_UP:
+        return "running"
+    proc = spawn_detached([quiet_interpreter(), GPUWATCH], cwd=ROOT)
+    write_pid(GPUWATCH_LOCK, proc.pid)
+    return "spawned"
+
+
+def stop_gpuwatch(cfg, kill=os.kill):
+    stopped = kill_pid(read_pid(GPUWATCH_LOCK), kill)
+    try:
+        os.remove(GPUWATCH_LOCK)
+    except OSError:
+        pass
+    return "stopped" if stopped else "not-running"
+
+
+# -- twins (automat lekkich glosow) -----------------------------------------------
+# tools/light_voices.py auto --every 600: nowe glosy z VCC -> nagrania -> douczanie -> test ->
+# publikacja na Pi -> mail. Petla nie dotyka locka (etap uczenia trwa godzinami), wiec zywotnosc to
+# plik pid z start_twins + sprawdzenie, czy proces o tym pid istnieje (brak locka swiezosci).
+TWINS = os.path.join(ROOT, "tools", "light_voices.py")
+TWINS_LOCK = os.path.join(tempfile.gettempdir(), "monitor_twins.lock")
+TWINS_EVERY_S = 600
+TWINS_LOG = os.path.join(ROOT, "project_files", "run_files", "light_voices", "auto.log")
+
+
+def pid_alive(pid):
+    """Does a process with this pid exist? (os.kill(pid, 0) on Windows would send CTRL_C, so ask tasklist.)"""
+    if not pid:
+        return False
+    if os.name == "nt":
+        try:
+            out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH"], capture_output=True,
+                                 timeout=10, **QUIET)
+            return (" %d " % pid) in out.stdout.decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _twins_disabled():
+    """True when VOICE_TWINS_ENABLED=0 in ~/.claude/voice.env (per-machine opt-out)."""
+    return _voice_env_value("VOICE_TWINS_ENABLED") == "0"
+
+
+def twins_state(cfg, now=None, probe=None):
+    """Automat lekkich glosow. Zywotnosc: pid_alive(pid z TWINS_LOCK) (testy podmieniaja pid_alive)."""
+    if not os.path.exists(TWINS):
+        return STATE_OFF, "brak tools/light_voices.py (nie dotyczy)"
+    if not vcc_repo():
+        return STATE_OFF, "ta maszyna nie ma klonu VideoContentCreator (nie dotyczy)"
+    if _twins_disabled():
+        return STATE_OFF, "wylaczone per voice.env (VOICE_TWINS_ENABLED=0)"
+    up = bool(pid_alive(read_pid(TWINS_LOCK)))   # `probe` is the port connector: not for pids
+    return (STATE_UP if up else STATE_DOWN), \
+        "automat lekkich glosow: nowe glosy z VCC -> nagrania, douczanie, test, publikacja na Pi, mail"
+
+
+def start_twins(cfg):
+    state = twins_state(cfg)[0]
+    if state == STATE_OFF:
+        return "disabled" if (os.path.exists(TWINS) and vcc_repo() and _twins_disabled()) else "skipped"
+    if state == STATE_UP:
+        return "running"
+    proc = spawn_detached([quiet_interpreter(), TWINS, "auto", "--every", str(TWINS_EVERY_S)],
+                          cwd=ROOT, log=TWINS_LOG)
+    write_pid(TWINS_LOCK, proc.pid)
+    return "spawned"
+
+
+def stop_twins(cfg, kill=os.kill):
+    stopped = kill_pid(read_pid(TWINS_LOCK), kill)
+    try:
+        os.remove(TWINS_LOCK)
+    except OSError:
+        pass
+    return "stopped" if stopped else "not-running"
+
+
+# -- mail (zlecenia mailem) -------------------------------------------------------
+# tools/mail_inbox.py --loop: co 60 s IMAP skrzynki na zlecenia -> decyzja -> /api/tasks -> odpowiedz
+# w watku (openspec/changes/mail-zlecenia). Tylko w repo zbiorczym (tools/) i tylko na maszynie, ktora
+# ma liste upowaznionych z polem "inbox" ORAZ haslo tej skrzynki w Menedzerze poswiadczen: bez hasla
+# petla nie ma czym sie zalogowac, wiec usluga "nie dotyczy" zamiast padac w kolko.
+MAIL_INBOX = os.path.join(ROOT, "tools", "mail_inbox.py")
+MAIL_INBOX_LOCK = os.path.join(tempfile.gettempdir(), "monitor_mail_inbox.lock")
+MAIL_INBOX_POLL_S = 60
+MAIL_AUTH = os.path.join(os.path.expanduser("~"), ".claude", "mail_zlecenia.json")
+MAIL_INBOX_LOG = os.path.join(ROOT, "project_files", "run_files", "mail_zlecenia", "service.log")
+
+
+def _mail_cred_present(user):
+    """True when Credential Manager holds a password for `user` (via tools/send_mail.py)."""
+    import importlib.util
+    path = os.path.join(ROOT, "tools", "send_mail.py")
+    try:
+        spec = importlib.util.spec_from_file_location("send_mail", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return bool(mod.cred_read(user))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def mail_inbox_applies(auth_path=None, cred=None, exists=os.path.exists):
+    """(True, inbox) or (False, why not). Pure given `cred` and `exists`."""
+    if not exists(MAIL_INBOX):
+        return False, "brak tools/mail_inbox.py (nie dotyczy)"
+    try:
+        with open(auth_path or MAIL_AUTH, encoding="utf-8") as f:
+            inbox = str((json.load(f) or {}).get("inbox") or "").strip()
+    except (OSError, ValueError, AttributeError):
+        inbox = ""
+    if not inbox:
+        return False, "brak ~/.claude/mail_zlecenia.json z polem inbox (nie dotyczy)"
+    if not (cred or _mail_cred_present)(inbox):
+        return False, "brak hasla skrzynki zlecen w Menedzerze poswiadczen (nie dotyczy)"
+    return True, inbox
+
+
+def mail_inbox_state(cfg, now=None, probe=None, applies=None):
+    ok, why = (applies or mail_inbox_applies)()
+    if not ok:
+        return STATE_OFF, why
+    if _cfg_missing(cfg):
+        return STATE_OFF, "brak MONITOR_URL/MONITOR_TOKEN w ~/.claude/monitor.env"
+    live = ask_worker.lock_is_live(MAIL_INBOX_LOCK, time.time() if now is None else now, MAIL_INBOX_POLL_S)
+    return (STATE_UP if live else STATE_DOWN), "zlecenia mailem: skrzynka co %d s -> kolejka zadan" % MAIL_INBOX_POLL_S
+
+
+def start_mail_inbox(cfg):
+    state = mail_inbox_state(cfg)[0]
+    if state == STATE_OFF:
+        return "skipped"
+    if state == STATE_UP:
+        return "running"
+    proc = spawn_detached([quiet_interpreter(), MAIL_INBOX, "--loop"], cwd=ROOT, log=MAIL_INBOX_LOG)
+    write_pid(MAIL_INBOX_LOCK, proc.pid)
+    return "spawned"
+
+
+def stop_mail_inbox(cfg, kill=os.kill):
+    stopped = kill_pid(read_pid(MAIL_INBOX_LOCK), kill)
+    try:
+        os.remove(MAIL_INBOX_LOCK)
+    except OSError:
+        pass
+    return "stopped" if stopped else "not-running"
+
+
 SERVICES = [
     ("ask", "worker pytan", ask_state, start_ask, stop_ask),
     ("execute", "worker zlecen", execute_state, start_execute, stop_execute),
     ("vcc", "serwer glosow", vcc_state, start_vcc, stop_vcc),
+    ("gpuwatch", "czujnik GPU", gpuwatch_state, start_gpuwatch, stop_gpuwatch),
+    ("twins", "lekkie glosy", twins_state, start_twins, stop_twins),
     ("voice", "bramka glosowa", gateway_state, start_gateway, stop_gateway),
     ("dashboards", "dashboardy HA", dashboards_state, start_dashboards, stop_dashboards),
     ("bridge", "okna zdalnie", bridge_state, start_bridge, stop_bridge),
+    ("mail", "zlecenia mailem", mail_inbox_state, start_mail_inbox, stop_mail_inbox),
 ]
 
 
@@ -480,8 +736,30 @@ def start_all(cfg, only=None):
     alone. `only` filters to a single service by name (--restart --only voice to not disturb the
     bridge, user 2026-10-13: 8 restarts of the voice gateway in one day killed every browser's
     ttyd WebSocket and the user had to reload each window from HA)."""
-    return {name: start(cfg) for name, _t, _s, start, _stop in SERVICES
-            if only is None or name == only}
+    paused = tokens_paused()
+    return {name: ("paused" if paused and name in TOKEN_SERVICES else start(cfg))
+            for name, _t, _s, start, _stop in SERVICES if only is None or name == only}
+
+
+# 2026-10-29 (user: "jesli jest jakikolwiek proces zuzywajacy tokeny, spauzuj wszystkie"): services that can START
+# model work on their own (a task from the queue, a mail order). With the pause file they stay down, also after the
+# session-start hook runs `--start`. Idle windows and the voice gateway (user-initiated questions) are not stopped.
+TOKEN_SERVICES = ("ask", "execute", "mail")
+PAUSE_FILE = os.path.join(os.path.expanduser("~"), ".claude", "pause_tokens")
+
+
+def tokens_paused(path=None):
+    return os.path.exists(path or PAUSE_FILE)
+
+
+def set_pause(on, path=None):
+    path = path or PAUSE_FILE
+    if on:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+    elif os.path.exists(path):
+        os.remove(path)
 
 
 def stop_all(cfg, kill=os.kill, only=None):
@@ -498,6 +776,23 @@ def wait_until_up(cfg, names, deadline_s=6.0, sleep=time.sleep, probe=None):
         if all(rows.get(n) != STATE_DOWN for n in names):
             return True
         sleep(0.4)
+    return False
+
+
+def wait_until_down(names, deadline_s=3.0, sleep=time.sleep, probe=None):
+    """After a kill signal the port is held briefly. Wait before starting a replacement.
+    Only checks the gateway port (the one service that uses a port, not a lock). Pure logic,
+    tested via probe injection. Called in the restart path to fix a race: stop_gateway sends
+    TerminateProcess, start_gateway checks the port before the old process releases it, sees
+    STATE_UP and returns 'running' -- so no new process is spawned and the table still shows
+    STARY KOD after restart (found 2026-10-24)."""
+    host = gateway_bind()
+    end = time.time() + deadline_s
+    while time.time() < end:
+        connect = probe or (lambda h, p: port_open(h, p))
+        if not connect(host, GATEWAY_PORT):
+            return True
+        sleep(0.3)
     return False
 
 
@@ -545,6 +840,9 @@ def main(argv=None):
     ap.add_argument("--restart", action="store_true", help="stop, then start (after a pack update)")
     ap.add_argument("--only", metavar="SERVICE", default=None,
                     help="limit --start/--stop/--restart to one service (voice, bridge, ask, ...)")
+    ap.add_argument("--pause", action="store_true",
+                    help="stop ask/execute/mail and keep them down (also after --start) until --resume")
+    ap.add_argument("--resume", action="store_true", help="lift --pause and start them again")
     ap.add_argument("--json", action="store_true")
     # A hook runs on every session start and must neither print nor block: it spawns what is
     # missing and returns. Waiting for a lock to appear would put seconds on top of opening a
@@ -557,8 +855,18 @@ def main(argv=None):
 
     cfg = heartbeat.load_config()
 
+    if args.pause:
+        set_pause(True)
+        for name in TOKEN_SERVICES:
+            stop_all(cfg, only=name)
+    if args.resume:
+        set_pause(False)
+        args.start = True
+
     if args.stop or args.restart:
         stop_all(cfg, only=args.only)
+        if args.restart and (args.only is None or args.only == "voice"):
+            wait_until_down(["voice"])  # port release after TerminateProcess is not instant
     if args.start or args.restart:
         outcomes = start_all(cfg, only=args.only)
         spawned = [n for n, o in outcomes.items() if o == "spawned"]
@@ -573,8 +881,10 @@ def main(argv=None):
         print(json.dumps({"machine": platform.node(), "services": rows}, ensure_ascii=True))
         return 0
 
-    down = [r for r in rows if r["state"] == STATE_DOWN]
+    down = [r for r in rows if r["state"] == STATE_DOWN and not (tokens_paused() and r["name"] in TOKEN_SERVICES)]
     print(table(rows, "uslugi na %s:" % platform.node()))
+    if tokens_paused():
+        print("\n  WSTRZYMANE (zuzycie tokenow): %s -- wznow: python monitor/services.py --resume" % ", ".join(TOKEN_SERVICES))
     if down and not (args.start or args.restart):
         print("\n  nie dziala: %s -- podnies je: python monitor/services.py --start"
               % ", ".join(r["name"] for r in down))
