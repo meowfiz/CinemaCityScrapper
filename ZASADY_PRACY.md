@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.33 (2026-10-27). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.34 (2026-10-29). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -508,6 +508,16 @@ nie powtórkę tego, co widać w logach. Jedno zdanie = jeden fakt lub decyzja. 
 użytkownika 2026-10-17 — po serii wywołań narzędzi odpowiedź na proste pytanie o stan maszyn
 była zakopana za wydrukami API.
 
+**7.10 Mail z podsumowaniem to kilka zdań zwykłej mowy, nie zrzut liczb.** Każdy mail wysyłany automatycznie
+albo na koniec zadania (wynik obliczeń, nowy głos, zlecenie z maila, raport okna) mówi po ludzku: **co wyszło,
+czy lepiej, czy gorzej, jaki jest problem i co dalej**. Najwyżej kilka liczb, i tylko takich, które to rozstrzygają
+(„79% zamiast 80%, czyli gorzej”). Bez identyfikatorów zadań, ścieżek, komend, list parametrów, statystyk zasobów
+i fragmentów logów. Szczegóły zostają w repo, w raporcie albo w dzienniku zadania; mail może wskazać, gdzie są,
+jednym zdaniem. Generatory maili w kodzie mają czystą funkcję treści z testem, że wynik jest krótki.
+*Dlaczego:* prośba użytkownika 2026-10-29 („przestań bombardować mnie liczbami”): maile kolejki obliczeń miały
+po ~5 KB statystyk i 30 linii logu, maile o głosach trzy wskaźniki z trzema miejscami po przecinku. Wynik, który
+interesował, ginął w szumie.
+
 ---
 
 ## 8. RTK (token-optimised CLI)
@@ -562,7 +572,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.34 | 2026-10-29 | Reguła 7.10: mail z podsumowaniem (wynik obliczeń, nowy głos, zlecenie z maila, raport okna) to kilka zdań zwykłej mowy -- co wyszło, lepiej/gorzej, problem, co dalej; najwyżej kilka rozstrzygających liczb, bez identyfikatorów, ścieżek, statystyk i logów; generatory maili z testem krótkości. *Skąd:* prośba użytkownika 2026-10-29 („przestań bombardować mnie liczbami”). |
 | 1.33 | 2026-10-27 | Reguła 2.16: tytuł commita = jedno zrozumiałe zdanie o zrobionej pracy; stopka `Maszyna:` w każdym commicie (hook maszyny z `start`); `start` kończy się ostatnim commitem projektu (kiedy, maszyna, kto, tytuł; `tools/last_commit.py`). *Skąd:* decyzja użytkownika 2026-10-27. |
-| 1.32 | 2026-10-25 | Reguła 7.7: „wyślij maila" = wyślij od razu, bez dopytywania „Wysłać?", każdy adresat; draft do akceptacji tylko na wyraźne „poczekaj". Skill `mail` reguła 2 zmieniona. *Skąd:* polecenie użytkownika 2026-10-25 (powtórzone, „po raz kolejny"). |
 
-Starsze wpisy (pełna tabela 1.0–1.31): `project_integration/notes/ZASADY_HISTORIA.md`.
+Starsze wpisy (pełna tabela 1.0–1.32): `project_integration/notes/ZASADY_HISTORIA.md`.
