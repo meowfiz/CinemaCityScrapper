@@ -741,10 +741,10 @@ def start_all(cfg, only=None):
             for name, _t, _s, start, _stop in SERVICES if only is None or name == only}
 
 
-# 2026-10-29 (user: "jesli jest jakikolwiek proces zuzywajacy tokeny, spauzuj wszystkie"): services that can START
-# model work on their own (a task from the queue, a mail order). With the pause file they stay down, also after the
+# 2026-10-29 (user: "jesli jest jakikolwiek proces zuzywajacy tokeny, spauzuj wszystkie"): workers that START
+# model work on their own (a task from the queue); the mail receiver was taken off the list the same evening. With the pause file they stay down, also after the
 # session-start hook runs `--start`. Idle windows and the voice gateway (user-initiated questions) are not stopped.
-TOKEN_SERVICES = ("ask", "execute", "mail")
+TOKEN_SERVICES = ("ask", "execute")   # mail stays on: user 2026-10-29 "odbiornik maili zostaje, Mariola pracuje normalnie"
 PAUSE_FILE = os.path.join(os.path.expanduser("~"), ".claude", "pause_tokens")
 
 
