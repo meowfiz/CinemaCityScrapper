@@ -766,10 +766,23 @@ def warn_unpushed(cfg, url, token, cwd):
 PUSH_QUESTION_RE = re.compile(r"(wypchn|pushn|push|commit)[^?]{0,160}\?", re.I)
 
 
+# 2026-10-29: the dashboard-M window finished a mail order and wrote "Nie robilem commita ani pusha." -- a
+# statement, not a question, so the gate above let it through, and a 71 s task is below the 10-minute
+# auto-sync (2.9). Saying it is not pushed is the same miss as asking; both go back to the window.
+NOT_PUSHED_RE = re.compile(
+    r"(nie\s+(z?robi\w*|wykona\w*)\s+(jeszcze\s+)?(commit\w*|push\w*)"
+    r"|nie\s+(commit\w*|zacommit\w*|wypchn\w*|pushow\w*)"
+    r"|(commit|zmian\w*)\s+(jest|sa|zostal\w*)\s+lokaln"
+    r"|niewypchni\w*|nie\s+(jest|sa|zostal\w*)\s+(jeszcze\s+)?(wypchni|zacommit)"
+    r"|(not|haven'?t|didn'?t)\s+(been\s+)?(commit|push)\w*)", re.I)
+
+
 def asks_about_push(text):
-    """True when the tail of the reply asks the user whether to commit/push. Pure."""
+    """True when the tail of the reply asks the user whether to commit/push, or says the work was not
+    committed/pushed. Pure."""
     tail = (text or "")[-600:]
-    return bool(PUSH_QUESTION_RE.search(tail))
+    plain = tail.translate({0x142: "l", 0x141: "L", 0x105: "a", 0x119: "e", 0x15b: "s", 0x107: "c", 0x144: "n", 0xf3: "o", 0x17c: "z", 0x17a: "z"})
+    return bool(PUSH_QUESTION_RE.search(tail) or NOT_PUSHED_RE.search(plain))
 
 
 def last_assistant_text(transcript_path, max_bytes=200000):
