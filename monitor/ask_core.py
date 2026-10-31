@@ -395,6 +395,21 @@ def build_command(exe, paths, system, model=None, allow=None, deny=None,
     return cmd
 
 
+_CALLER = threading.local()
+
+
+def _log_prompt(stdin_text, model, cwd):
+    """Prompt ledger (slad-promptow): one direct entry with the exact stdin text, so the collector can
+    attribute the `claude -p` transcript (sha match) to the module that asked. persisted=True: the
+    transcript carries the call records, so this entry writes none. Never raises."""
+    try:
+        import prompt_log
+        prompt_log.log_prompt(model, stdin_text, getattr(_CALLER, "name", None), kind="cli-p",
+                              persisted=True, cwd=cwd)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def ask(*args, **kwargs):
     """(answer, error) -- see _ask_inner. Every call is also written to the model usage log
     (monitor/model_usage.py): who asked (calling module), which model, prompt, answer, time,
@@ -411,7 +426,11 @@ def ask(*args, **kwargs):
     if own_stats:
         kwargs["stats"] = {}
     t0 = time.time()
-    answer, error = _ask_inner(*args, **kwargs)
+    _CALLER.name = caller            # _ask_inner reads it for the prompt ledger (slad-promptow D7)
+    try:
+        answer, error = _ask_inner(*args, **kwargs)
+    finally:
+        _CALLER.name = None
     try:
         import model_usage
         st = kwargs.get("stats") or {}
@@ -444,6 +463,7 @@ def _ask_inner(paths, question, system=None, model=None, timeout=DEFAULT_TIMEOUT
                   + (context_block(context) if context else "")
                   + (question or ""))
     cmd = build_command(exe, paths, system, model, allow, deny, thread_id, first_turn)
+    _log_prompt(stdin_text, model, paths[0])
     run = runner or subprocess.run
     # the headless run fires the repo's hooks too; heartbeat.py must not count it as an open window
     run_env = dict(env or os.environ, MONITOR_HEADLESS="1")
