@@ -273,7 +273,11 @@ class FileTracker:
 
     def _close_same_key(self, key, keep_id):
         out = []
-        for cid in [k for k, c in self.pcalls.items() if c.get("key") == key and k != keep_id]:
+        # Only a call that already has a usage is closed here. One whose answer has not been read yet stays:
+        # Claude Code writes the next api-request line BEFORE the late assistant lines of the previous call
+        # (measured 30.10: 5 of 85 calls of one project written as no_response with zero tokens, 1.1 percent of
+        # its weight). A call that never gets an answer is written as no_response by flush_idle.
+        for cid in [k for k, c in self.pcalls.items() if c.get("key") == key and k != keep_id and c.get("usage")]:
             out.append(self._finish(self.pcalls.pop(cid)))
         return out
 
