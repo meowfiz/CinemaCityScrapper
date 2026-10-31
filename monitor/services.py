@@ -562,6 +562,48 @@ def stop_gpuwatch(cfg, kill=os.kill):
     return "stopped" if stopped else "not-running"
 
 
+# -- ledger (slad promptow, opsx slad-promptow D16) ---------------------------------
+# transcript_ledger.py --loop 120 czyta transkrypty Claude Code (~/.claude/projects) i dopisuje prompty
+# i wywolania modeli do ~/.claude/prompts/RRRR-MM-DD.jsonl. Nie uzywa tokenow, wiec nie jest w
+# TOKEN_SERVICES i `--pause` jej nie wylacza. Zywotnosc: swiezosc locka (petla dotyka go co przebieg).
+LEDGER = os.path.join(HERE, "transcript_ledger.py")
+LEDGER_LOCK = os.path.join(tempfile.gettempdir(), "monitor_ledger.lock")
+LEDGER_EVERY_S = 120
+LEDGER_LIVE_S = LEDGER_EVERY_S + 30   # lock_is_live mnozy przez LOCK_STALE_POLLS (3)
+
+
+def _ledger_applies(projects_dir=None):
+    return os.path.isdir(projects_dir or os.path.join(os.path.expanduser("~"), ".claude", "projects"))
+
+
+def ledger_state(cfg, now=None, probe=None, applies=None):
+    """Zbieracz sladu promptow zyje? Maszyna bez katalogu transkryptow (nigdy nie uruchamiano Claude Code):
+    nie dotyczy."""
+    if not (_ledger_applies() if applies is None else applies):
+        return STATE_OFF, "brak ~/.claude/projects (nie dotyczy)"
+    live = ask_worker.lock_is_live(LEDGER_LOCK, time.time() if now is None else now, LEDGER_LIVE_S)
+    return (STATE_UP if live else STATE_DOWN),         "prompty i wywolania modeli z transkryptow co %ds do ~/.claude/prompts (bez tokenow)" % LEDGER_EVERY_S
+
+
+def start_ledger(cfg):
+    if not _ledger_applies():
+        return "skipped"
+    if ledger_state(cfg)[0] == STATE_UP:
+        return "running"
+    proc = spawn_detached([quiet_interpreter(), LEDGER, "--loop", str(LEDGER_EVERY_S)], cwd=ROOT)
+    write_pid(LEDGER_LOCK, proc.pid)
+    return "spawned"
+
+
+def stop_ledger(cfg, kill=os.kill):
+    stopped = kill_pid(read_pid(LEDGER_LOCK), kill)
+    try:
+        os.remove(LEDGER_LOCK)
+    except OSError:
+        pass
+    return "stopped" if stopped else "not-running"
+
+
 # -- twins (automat lekkich glosow) -----------------------------------------------
 # tools/light_voices.py auto --every 600: nowe glosy z VCC -> nagrania -> douczanie -> test ->
 # publikacja na Pi -> mail. Petla nie dotyka locka (etap uczenia trwa godzinami), wiec zywotnosc to
@@ -705,6 +747,7 @@ SERVICES = [
     ("execute", "worker zlecen", execute_state, start_execute, stop_execute),
     ("vcc", "serwer glosow", vcc_state, start_vcc, stop_vcc),
     ("gpuwatch", "czujnik GPU", gpuwatch_state, start_gpuwatch, stop_gpuwatch),
+    ("ledger", "slad promptow", ledger_state, start_ledger, stop_ledger),
     ("twins", "lekkie glosy", twins_state, start_twins, stop_twins),
     ("voice", "bramka glosowa", gateway_state, start_gateway, stop_gateway),
     ("dashboards", "dashboardy HA", dashboards_state, start_dashboards, stop_dashboards),
