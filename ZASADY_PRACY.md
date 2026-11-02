@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.35 (2026-10-29). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.36 (2026-11-02). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -485,6 +485,8 @@ postać `Glosowo-NAME:` z tym samym identyfikatorem. Przeglądarka odtwarza tylk
 z własnym `NAME` — inne urządzenia ich nie słyszą. Nietagowane `Glosowo:` gra na wszystkich.
 *Dlaczego:* bez tagu PC grał odpowiedzi wysłane z telefonu i odwrotnie (broadcast 2026-10-14).
 
+**Adresat `auto` (asystent w samochodzie).** `auto` jest stałym NAME w tym samym routingu, czytelnikiem jest strona Auto, nie strona okna. Gdy użytkownik w dowolnym oknie prosi „daj znać do auta / asystentowi samochodowemu / powiedz to w aucie”, okno emituje linię `Glosowo-auto: …`; tylko strona Auto ją odtwarza (inne urządzenia i zwykłe `Glosowo:` do auta nie trafiają). Pytanie ze strony Auto niesie `[glos-auto]`, odpowiedź okna wraca `Glosowo-auto:`. *Dlaczego:* decyzja użytkownika 2026-11-02 — auto ma być adresatem jak urządzenie, bez osobnego kanału (`tools/auto_route.py`, openspec auto-kontekst-rozmowy grupa 7).
+
 **7.7 Mail wychodzi tylko na wyraźną prośbę — ale „wyślij maila" znaczy wyślij od razu.** Wysyłka
 przez skill `mail` (`project_integration/tools/send_mail.py`, Gmail). Gdy użytkownik mówi „wyślij
 maila" (albo równoważne), Claude **wysyła od razu, bez dopytywania „Wysłać?"** — każdy adresat, także
@@ -577,7 +579,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.36 | 2026-11-02 | Reguła 7.6: adresat `auto` (`[glos-auto]` / `Glosowo-auto:`) w routingu głosowym -- okno emituje linię na prośbę „daj znać do auta”, odtwarza ją tylko strona Auto. *Skąd:* decyzja użytkownika 2026-11-02 (openspec auto-kontekst-rozmowy 7.1). |
 | 1.35 | 2026-10-29 | Reguła 2.13: dane między maszynami tylko przez `transfer.py --send` (skill `przerzuc`, pobranie: `sync.py pull` zleca drugiej maszynie `--send`), nigdy plik po pliku przez `ssh`/`scp` z okna projektu; przerzut zgłasza się serwerowi od startu (orkiestrator i pulpit monitora, sekcja Przerzuty), małe pliki jadą jednym zipem, pliki od 64 MB osobno bez kopii na dysku. *Skąd:* polecenie użytkownika 2026-10-29 (okno projektu kopiowało pliki pojedynczo z domu, przerzutu nie było widać w orkiestratorze). |
-| 1.34 | 2026-10-29 | Reguła 7.10: mail z podsumowaniem (wynik obliczeń, nowy głos, zlecenie z maila, raport okna) to kilka zdań zwykłej mowy -- co wyszło, lepiej/gorzej, problem, co dalej; najwyżej kilka rozstrzygających liczb, bez identyfikatorów, ścieżek, statystyk i logów; generatory maili z testem krótkości. *Skąd:* prośba użytkownika 2026-10-29 („przestań bombardować mnie liczbami”). |
 
 Starsze wpisy (pełna tabela 1.0–1.33): `project_integration/notes/ZASADY_HISTORIA.md`.
