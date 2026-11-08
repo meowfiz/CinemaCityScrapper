@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.36 (2026-11-02). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.37 (2026-11-08). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -23,10 +23,14 @@ poprawić, gdy przestanie pasować.
 
 **1.1 Każda sesja kończy się notatką.** Przed commitem Claude:
 1. aktualizuje sekcję `## Ostatnia sesja` w `notes/start.md` (data, co zrobiono, aktywne TODO),
-2. tworzy lub uzupełnia `notes/sesje/RRRR-MM-DD-sesja.md` wg szablonu:
+2. tworzy lub uzupełnia `notes/sesje/RRRR-MM-DD-sesja.md` wg szablonu,
+3. pisze w tej notatce sekcję `## Na głos` (dwie linie, patrz niżej):
 
 ```
 # Sesja RRRR-MM-DD
+## Na głos
+Zrobione: <co udało się dziś, 1-2 zdania, do 200 znaków>
+W toku: <nad czym pracujemy teraz, do 140 znaków; brak linii = nic otwartego>
 ## Co zrobiono
 ## Kluczowe decyzje / zmiany semantyki
 ## Aktywne TODO / pending
@@ -36,6 +40,15 @@ poprawić, gdy przestanie pasować.
 
 *Dlaczego:* praca idzie na dwóch maszynach i w wielu sesjach; bez notatki następna sesja zaczyna
 od archeologii. Użytkownik **nigdy nie musi o tym przypominać** — brak notatki to błąd Claude'a.
+
+**Sekcja `## Na głos`** jest czytana przez hub i mówiona w aucie (przycisk „co nowego” w CAR), więc pisze się ją
+jak `Glosowo:` (7.6): potoczna polszczyzna **z diakrytykami**, jedno–dwa zdania na linię, bez ścieżek, nazw plików,
+commitów i numerów zadań. Bez nazwisk osób prywatnych, ocen, adresów, kwot i danych zdrowotnych — w aucie może
+słuchać osoba trzecia. Gdy nic się nie udało, `Zrobione:` mówi to wprost („Sprawdziliśmy X, nie działa”, 5.8).
+Sekcja jest jedna na plik i **nadpisywana** (jak checkpoint), gdy sesja ma kilka zadań. Stare notatki nie są
+uzupełniane wstecz. *Dlaczego:* decyzja użytkownika 2026-11-08 — punkty „Co zrobiono” to ścieżki i numery arXiv,
+nie nadają się do ucha, a streszczanie ich modelem przy każdym naciśnięciu kosztuje tokeny; notatka z dnia jest
+już wymuszana bramką G1 (2.8), więc sekcja jedzie na istniejącym obowiązku.
 
 **1.6 Checkpoint po każdym ukończonym podzadaniu.** Gdy Claude kończy jedno podzadanie i przechodzi
 do następnego (np. skończyłem implementację, zaczynam testy; skończyłem testy, zaczynam notatki),
@@ -544,7 +557,7 @@ Każde repo ma te same punkty wejścia, czytane mechanicznie:
 | `CLAUDE.md` | `@ZASADY_PRACY.md` + reguły projektu | Claude |
 | `ZASADY_PRACY.md` | ten plik, identyczny wszędzie | Claude, meta-projekt (wersja w nagłówku) |
 | `notes/start.md` | sekcja `## Ostatnia sesja — DATA (sesja N)` na górze | człowiek, meta-projekt (stan projektu) |
-| `notes/sesje/RRRR-MM-DD-*.md` | notatki sesji wg szablonu 1.1 | człowiek, meta-projekt (oś czasu) |
+| `notes/sesje/RRRR-MM-DD-*.md` | notatki sesji wg szablonu 1.1, z sekcją `## Na głos` (dwie linie `Zrobione:` / `W toku:`) | człowiek, meta-projekt (oś czasu), CAR „co nowego” |
 | `notes/HANDOFF_*.md` | punkty wejścia do tematów | druga maszyna |
 | `notes/publikacja/` | materiały pod publikację, plan „co mamy / co chcemy", szablon prerejestracji | człowiek |
 | `openspec/changes/*/tasks.md` | zadania `- [ ]` / `- [x]`, wpisy PREREJESTRACJA | meta-projekt (otwarte zadania) |
@@ -579,7 +592,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.37 | 2026-11-08 | Reguła 1.1: każda notatka sesji ma sekcję `## Na głos` (`Zrobione:` do 200 znaków, `W toku:` do 140; potoczna polszczyzna z diakrytykami, bez ścieżek i danych osób trzecich); hub zbiera ją pollerem i mówi w CAR („co nowego”). *Skąd:* decyzja użytkownika 2026-11-08 (openspec car-status-osiagniec, decyzja 1). |
 | 1.36 | 2026-11-02 | Reguła 7.6: adresat `auto` (`[glos-auto]` / `Glosowo-auto:`) w routingu głosowym -- okno emituje linię na prośbę „daj znać do auta”, odtwarza ją tylko strona Auto. *Skąd:* decyzja użytkownika 2026-11-02 (openspec auto-kontekst-rozmowy 7.1). |
-| 1.35 | 2026-10-29 | Reguła 2.13: dane między maszynami tylko przez `transfer.py --send` (skill `przerzuc`, pobranie: `sync.py pull` zleca drugiej maszynie `--send`), nigdy plik po pliku przez `ssh`/`scp` z okna projektu; przerzut zgłasza się serwerowi od startu (orkiestrator i pulpit monitora, sekcja Przerzuty), małe pliki jadą jednym zipem, pliki od 64 MB osobno bez kopii na dysku. *Skąd:* polecenie użytkownika 2026-10-29 (okno projektu kopiowało pliki pojedynczo z domu, przerzutu nie było widać w orkiestratorze). |
 
 Starsze wpisy (pełna tabela 1.0–1.33): `project_integration/notes/ZASADY_HISTORIA.md`.
