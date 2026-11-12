@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.37 (2026-11-08). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.39 (2026-11-12). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -31,6 +31,7 @@ poprawić, gdy przestanie pasować.
 ## Na głos
 Zrobione: <co udało się dziś, 1-2 zdania, do 200 znaków>
 W toku: <nad czym pracujemy teraz, do 140 znaków; brak linii = nic otwartego>
+## Zlecone                 (reguła 1.7: - [wykonane|problem|czeka] opis, linia na zadanie)
 ## Co zrobiono
 ## Kluczowe decyzje / zmiany semantyki
 ## Aktywne TODO / pending
@@ -84,6 +85,26 @@ do 40 znaków, bez ścieżek; to tekst, który wyląduje na ekranie blokady tele
 (rozmowa, nauka języka) nazwy nie potrzebują. *Dlaczego:* monitor liczy czas zadania od promptu do stopu
 i powiadamia dopiero powyżej progu; bez nazwy powiadomienie pokazuje pierwsze słowa promptu, które rzadko
 mówią, co się właściwie skończyło.
+
+**1.7 Zlecone zadania w notatce dnia — dla raportu dnia.** Każde zadanie zlecone przez użytkownika tego dnia
+(głosem, w oknie, mailem, z telefonu) ma w notatce dnia (1.1) jedną linię w sekcji `## Zlecone`:
+
+```
+## Zlecone
+- [wykonane] Raport dnia jako PDF mailem o 21:00
+- [czeka] Ślepy test głosu Karana: odsłuch użytkownika
+- [problem] Urwane komunikaty głosowe w aucie: przyczyna nieznana
+```
+
+Stan to jedno słowo: `wykonane` (zrobione i sprawdzone), `problem` (poważna przeszkoda), `czeka` (na decyzję,
+odsłuch, akceptację użytkownika albo na coś zewnętrznego: kolejkę obliczeń, drugą maszynę). Opis jak `Na głos`:
+zdanie dla człowieka, bez ścieżek, plików, funkcji i commitów. Zadanie niezamknięte przechodzi do notatki
+następnego dnia **z tym samym opisem** (raport łączy dni po treści linii); zadanie, które czeka dłużej niż
+dzień, raport pokazuje na czerwono. Sekcję czyta raport dnia (`tools/daily_report.py` w `project_integration`:
+codziennie o 21:00 PDF mailem ze wszystkich projektów, kolory wg reguł z `openspec/changes/raport-dnia-pdf`).
+*Dlaczego:* decyzja użytkownika 2026-11-12 — zleca dużo rzeczy w wielu oknach i część się gubiła (render głosu
+Karana skończył się 10.11, a przez dwa dni nikt o nim nie wiedział, bo był tylko w opisie notatki); polecenia
+są w śladzie promptów, ale bez linii w notatce nie da się sprawdzić, co z nich wyszło.
 
 ---
 
@@ -342,6 +363,8 @@ to, co czytane w każdej sesji, ma być skrótem, szczegóły na żądanie.
 puste zdania ukrywają brak treści, a recenzent je widzi (ZASADY 5.14). Wzorce opisane na podstawie
 Wikipedii („Signs of AI writing”) i dwóch prac recenzowanych (Kobak i in. 2025, Juzek i Ward 2025).
 
+**4.13 Każdy artefakt ma na górze datę i godzinę wygenerowania.** Strona publikowana narzędziem Artifact (raport, odsłuch, ślepy test, dashboard, tabela wyników) zaczyna się widoczną linią `Wygenerowano: RRRR-MM-DD GG:MM` (czas lokalny maszyny, która go zrobiła); każda aktualizacja zmienia tę linię na nową datę. W prezentacji linia leży na slajdzie roboczym (nie na slajdach pokazywanych publiczności), a w artefakcie z bazą danych także przy każdym wierszu, który Claude dopisał. *Dlaczego:* decyzja użytkownika 2026-11-10 — po linku do odsłuchu nie dało się poznać, czy artefakt jest nowy, czy z poprzedniego dnia („wygląda na stary, bo wszystkie odpowiedzi są zapisane”); data na górze rozstrzyga to bez otwierania historii wersji.
+
 ---
 
 ## 5. Nauka i pomiar
@@ -592,7 +615,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
-| 1.37 | 2026-11-08 | Reguła 1.1: każda notatka sesji ma sekcję `## Na głos` (`Zrobione:` do 200 znaków, `W toku:` do 140; potoczna polszczyzna z diakrytykami, bez ścieżek i danych osób trzecich); hub zbiera ją pollerem i mówi w CAR („co nowego”). *Skąd:* decyzja użytkownika 2026-11-08 (openspec car-status-osiagniec, decyzja 1). |
-| 1.36 | 2026-11-02 | Reguła 7.6: adresat `auto` (`[glos-auto]` / `Glosowo-auto:`) w routingu głosowym -- okno emituje linię na prośbę „daj znać do auta”, odtwarza ją tylko strona Auto. *Skąd:* decyzja użytkownika 2026-11-02 (openspec auto-kontekst-rozmowy 7.1). |
+| 1.39 | 2026-11-12 | Reguła 1.7: notatka dnia ma sekcję `## Zlecone` z linią `- [stan] opis` (stan: wykonane / problem / czeka) na każde zadanie zlecone przez użytkownika; zadanie niezamknięte przechodzi dalej z tym samym opisem. Czyta ją raport dnia (`tools/daily_report.py`, PDF mailem o 21:00 ze wszystkich projektów); szablon notatki w 1.1 uzupełniony. *Skąd:* decyzja użytkownika 2026-11-12 (zadania się gubiły; openspec raport-dnia-pdf). |
+| 1.38 | 2026-11-10 | Reguła 4.13: każdy artefakt (strona z narzędzia Artifact) ma na górze `Wygenerowano: RRRR-MM-DD GG:MM`, aktualizowane przy każdej publikacji; w prezentacji na slajdzie roboczym. *Skąd:* decyzja użytkownika 2026-11-10 (odsłuch Karana: link wyglądał na stary, a nie było jak sprawdzić daty). |
 
-Starsze wpisy (pełna tabela 1.0–1.33): `project_integration/notes/ZASADY_HISTORIA.md`.
+Starsze wpisy (pełna tabela 1.0–1.39): `project_integration/notes/ZASADY_HISTORIA.md`.
