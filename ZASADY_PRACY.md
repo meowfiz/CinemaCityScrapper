@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.39 (2026-11-12). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.40 (2026-11-13). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -561,6 +561,13 @@ jednym zdaniem. Generatory maili w kodzie mają czystą funkcję treści z teste
 po ~5 KB statystyk i 30 linii logu, maile o głosach trzy wskaźniki z trzema miejscami po przecinku. Wynik, który
 interesował, ginął w szumie.
 
+**7.11 Mail tylko ważny, zbiorczy albo wymagający decyzji.** Claude, agenci, okna i automaty (kolejka obliczeń, lekkie głosy,
+pętle) nie wysyłają maili o postępie: start, koniec zadania, „gotowe”, „w toku”. Mail wychodzi, gdy (a) coś się zepsuło i czeka na
+człowieka (BŁĄD), (b) potrzebna jest decyzja właściciela, albo (c) to zbiorcze podsumowanie (raport dnia, wynik zleconego mailem
+zadania, o który właściciel prosił). Postęp i zakończenia widać w raporcie dnia, w widoku „Teraz” w HA i w notatkach. Wyjątek: właściciel
+wprost prosi o mail (7.7). *Dlaczego:* decyzja użytkownika 2026-11-13 („to bez sensu i spam”): 13.11 do 11:40 wyszło 19 maili,
+w tym 13 powiadomień kolejki obliczeń o skończonych zadaniach; 12.11: 11, w tym 7 z kolejki.
+
 ---
 
 ## 8. RTK (token-optimised CLI)
@@ -615,7 +622,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.40 | 2026-11-13 | Reguła 7.11: mail tylko ważny (błąd), zbiorczy albo wymagający decyzji; koniec maili o postępie i zakończeniach (kolejka obliczeń: mail tylko przy BŁĘDZIE). *Skąd:* decyzja użytkownika 2026-11-13 (19 maili 13.11, 13 z kolejki obliczeń). |
 | 1.39 | 2026-11-12 | Reguła 1.7: notatka dnia ma sekcję `## Zlecone` z linią `- [stan] opis` (stan: wykonane / problem / czeka) na każde zadanie zlecone przez użytkownika; zadanie niezamknięte przechodzi dalej z tym samym opisem. Czyta ją raport dnia (`tools/daily_report.py`, PDF mailem o 21:00 ze wszystkich projektów); szablon notatki w 1.1 uzupełniony. *Skąd:* decyzja użytkownika 2026-11-12 (zadania się gubiły; openspec raport-dnia-pdf). |
-| 1.38 | 2026-11-10 | Reguła 4.13: każdy artefakt (strona z narzędzia Artifact) ma na górze `Wygenerowano: RRRR-MM-DD GG:MM`, aktualizowane przy każdej publikacji; w prezentacji na slajdzie roboczym. *Skąd:* decyzja użytkownika 2026-11-10 (odsłuch Karana: link wyglądał na stary, a nie było jak sprawdzić daty). |
 
-Starsze wpisy (pełna tabela 1.0–1.39): `project_integration/notes/ZASADY_HISTORIA.md`.
+Starsze wpisy (pełna tabela 1.0–1.40): `project_integration/notes/ZASADY_HISTORIA.md`.
