@@ -1,6 +1,6 @@
 # ZASADY PRACY — wspólne dla wszystkich projektów
 
-Wersja 1.40 (2026-11-13). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
+Wersja 1.41 (2026-11-13). Jeden plik, wrzucany do każdego repozytorium. Claude czyta go przez
 `@ZASADY_PRACY.md` w `CLAUDE.md`. Projekt zbiorczy (integrujący widok na wszystkie repozytoria)
 polega na **sekcji 9** — stałych ścieżkach i nazwach, po których da się czytać każde repo tak samo.
 
@@ -567,6 +567,13 @@ człowieka (BŁĄD), (b) potrzebna jest decyzja właściciela, albo (c) to zbior
 zadania, o który właściciel prosił). Postęp i zakończenia widać w raporcie dnia, w widoku „Teraz” w HA i w notatkach. Wyjątek: właściciel
 wprost prosi o mail (7.7). *Dlaczego:* decyzja użytkownika 2026-11-13 („to bez sensu i spam”): 13.11 do 11:40 wyszło 19 maili,
 w tym 13 powiadomień kolejki obliczeń o skończonych zadaniach; 12.11: 11, w tym 7 z kolejki.
+**To samo dotyczy powiadomień na telefon (HA, ntfy).** Push idzie, gdy trzeba coś zrobić (czeka na zgodę, błąd lub awaria,
+decyzja), gdy kończy się duże zadanie (monitor: od 30 min) albo gdy telefon sam o coś pytał (odpowiedź na pytanie, wynik zlecenia
+z telefonu). Bez pushy o krótkich zadaniach, o agentach w tle i o commicie, który automat wypchnie za chwilę (monitor: dopiero
+gdy leży niewypchnięty 2 h). Testy nigdy nie wysyłają pushy: wyjście do HA w testach jest zaślepione na cały przebieg, nie tylko
+na czas jednego testu. *Dlaczego:* decyzja użytkownika 2026-11-13 („małe kurduple niech nie przychodzą”): w 36 h 12–13.11 telefon
+dostał 210 pushy, w tym 106 „skończył” (połowa poniżej 5 min) i 62 „commit tylko na”; „Claude: echo: anuluj” z 9–13.11 to był test,
+którego spóźniona odpowiedź po cofnięciu zaślepki szła prawdziwą drogą do HA (13 pushy).
 
 ---
 
@@ -622,7 +629,7 @@ wgranie do wszystkich repo.
 
 | wersja | data | co i skąd |
 |---|---|---|
+| 1.41 | 2026-11-13 | Reguła 7.11 rozszerzona o powiadomienia na telefon (HA, ntfy): tylko gdy trzeba działać, duże zadanie (od 30 min) albo zaproszone przez telefon; commit niewypchnięty dopiero po 2 h; testy nigdy nie wysyłają pushy. *Skąd:* decyzja użytkownika 2026-11-13 (210 pushy w 36 h; „echo: anuluj” z testu). |
 | 1.40 | 2026-11-13 | Reguła 7.11: mail tylko ważny (błąd), zbiorczy albo wymagający decyzji; koniec maili o postępie i zakończeniach (kolejka obliczeń: mail tylko przy BŁĘDZIE). *Skąd:* decyzja użytkownika 2026-11-13 (19 maili 13.11, 13 z kolejki obliczeń). |
-| 1.39 | 2026-11-12 | Reguła 1.7: notatka dnia ma sekcję `## Zlecone` z linią `- [stan] opis` (stan: wykonane / problem / czeka) na każde zadanie zlecone przez użytkownika; zadanie niezamknięte przechodzi dalej z tym samym opisem. Czyta ją raport dnia (`tools/daily_report.py`, PDF mailem o 21:00 ze wszystkich projektów); szablon notatki w 1.1 uzupełniony. *Skąd:* decyzja użytkownika 2026-11-12 (zadania się gubiły; openspec raport-dnia-pdf). |
 
-Starsze wpisy (pełna tabela 1.0–1.40): `project_integration/notes/ZASADY_HISTORIA.md`.
+Starsze wpisy (pełna tabela 1.0–1.41): `project_integration/notes/ZASADY_HISTORIA.md`.
